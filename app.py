@@ -297,11 +297,12 @@ summary = (
 col_tbl, col_bar = st.columns([2, 3])
 
 with col_tbl:
-    st.dataframe(
-        summary.style.background_gradient(subset=["Acumulado (mm)"], cmap="Blues"),
-        use_container_width=True,
-        hide_index=True,
+    styled = (
+        summary.style.background_gradient(subset=["Acumulado (mm)"], cmap="Blues")
+        if summary["Acumulado (mm)"].max() > 0
+        else summary.style
     )
+    st.dataframe(styled, use_container_width=True, hide_index=True)
 
 with col_bar:
     fig_bar = px.bar(
