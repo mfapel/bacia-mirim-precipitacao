@@ -1,6 +1,8 @@
 """
-Camada de acesso à API pública do INMET.
-Estações automáticas (tipo T) filtradas pela Bacia Mirim.
+Camada de acesso a dados de precipitação — Bacia Mirim.
+
+Estações: API pública INMET (lista e coordenadas).
+Precipitação: Open-Meteo Archive API (ERA5 + modelos NWP, gratuita, sem autenticação).
 """
 
 import requests
@@ -9,6 +11,8 @@ from datetime import datetime, timedelta
 import streamlit as st
 
 INMET_BASE = "https://apitempo.inmet.gov.br"
+OPENMETEO_ARCHIVE = "https://archive-api.open-meteo.com/v1/archive"
+OPENMETEO_FORECAST = "https://api.open-meteo.com/v1/forecast"
 
 # Bounding box da Bacia Mirim e entorno
 # Cobre: Jaguarão, Pelotas, Rio Grande, Santa Vitória do Palmar, Bagé, Canguçu
@@ -49,61 +53,63 @@ def get_stations() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def get_station_data(station_code: str, date_start: str, date_end: str) -> pd.DataFrame:
+def get_daily_series(lat: float, lon: float, days: int) -> pd.DataFrame:
     """
-    Busca dados horários de uma estação entre duas datas (formato YYYY-MM-DD).
-    Retorna DataFrame com coluna CHUVA (mm) e DT_MEDICAO (datetime).
+    Retorna série diária de precipitação acumulada para uma coordenada.
+    Usa Open-Meteo Archive API (ERA5 reanalysis + NWP).
     """
-    url = f"{INMET_BASE}/estacao/{date_start}/{date_end}/{station_code}"
+    end = datetime.now().date()
+    start = end - timedelta(days=days)
+
+    # Open-Meteo: dados históricos (archive) até ontem
+    # Para hoje usa o endpoint de forecast
+    yesterday = end - timedelta(days=1)
+
+    params_archive = {
+        "latitude": lat,
+        "longitude": lon,
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": yesterday.strftime("%Y-%m-%d"),
+        "daily": "precipitation_sum",
+        "timezone": "America/Sao_Paulo",
+    }
+    params_forecast = {
+        "latitude": lat,
+        "longitude": lon,
+        "daily": "precipitation_sum",
+        "timezone": "America/Sao_Paulo",
+        "forecast_days": 1,
+    }
+
+    frames = []
     try:
-        resp = requests.get(url, timeout=30)
-        if resp.status_code != 200:
-            return pd.DataFrame()
-        data = resp.json()
+        r = requests.get(OPENMETEO_ARCHIVE, params=params_archive, timeout=15)
+        if r.status_code == 200:
+            d = r.json()["daily"]
+            frames.append(pd.DataFrame({"Data": d["time"], "Precipitação (mm)": d["precipitation_sum"]}))
     except requests.RequestException:
-        return pd.DataFrame()
+        pass
 
-    if not data:
-        return pd.DataFrame()
+    try:
+        r = requests.get(OPENMETEO_FORECAST, params=params_forecast, timeout=15)
+        if r.status_code == 200:
+            d = r.json()["daily"]
+            frames.append(pd.DataFrame({"Data": d["time"], "Precipitação (mm)": d["precipitation_sum"]}))
+    except requests.RequestException:
+        pass
 
-    df = pd.DataFrame(data)
-    df["CHUVA"] = pd.to_numeric(df.get("CHUVA", 0), errors="coerce").fillna(0)
-    df["DT_MEDICAO"] = pd.to_datetime(df["DT_MEDICAO"], errors="coerce")
-    return df
-
-
-def get_accumulated(station_code: str, days: int = 7) -> float:
-    """Retorna precipitação total acumulada nos últimos N dias (mm)."""
-    end = datetime.now()
-    start = end - timedelta(days=days)
-    df = get_station_data(
-        station_code,
-        start.strftime("%Y-%m-%d"),
-        end.strftime("%Y-%m-%d"),
-    )
-    if df.empty or "CHUVA" not in df.columns:
-        return 0.0
-    return float(df["CHUVA"].sum())
-
-
-def get_daily_series(station_code: str, days: int) -> pd.DataFrame:
-    """Retorna série diária de precipitação acumulada para o período."""
-    end = datetime.now()
-    start = end - timedelta(days=days)
-    df = get_station_data(
-        station_code,
-        start.strftime("%Y-%m-%d"),
-        end.strftime("%Y-%m-%d"),
-    )
-    if df.empty:
+    if not frames:
         return pd.DataFrame(columns=["Data", "Precipitação (mm)"])
 
-    daily = (
-        df.dropna(subset=["DT_MEDICAO"])
-        .groupby(df["DT_MEDICAO"].dt.date)["CHUVA"]
-        .sum()
-        .reset_index()
-    )
-    daily.columns = ["Data", "Precipitação (mm)"]
-    daily["Data"] = pd.to_datetime(daily["Data"])
-    return daily
+    df = pd.concat(frames).drop_duplicates("Data")
+    df["Data"] = pd.to_datetime(df["Data"])
+    df["Precipitação (mm)"] = pd.to_numeric(df["Precipitação (mm)"], errors="coerce").fillna(0)
+    return df.sort_values("Data").reset_index(drop=True)
+
+
+def get_accumulated(lat: float, lon: float, days: int = 7) -> float:
+    """Retorna precipitação total acumulada nos últimos N dias (mm)."""
+    df = get_daily_series(lat, lon, days)
+    if df.empty:
+        return 0.0
+    return float(df["Precipitação (mm)"].sum())

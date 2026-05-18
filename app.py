@@ -79,13 +79,20 @@ st.success(f"{len(stations_df)} estações encontradas na região da Bacia Mirim
 
 # ── Acumulado por estação ─────────────────────────────────────────────────────
 @st.cache_data(ttl=1800, show_spinner=False)
-def load_all_accumulated(codes: tuple, days: int) -> dict:
-    return {code: get_accumulated(code, days) for code in codes}
+def load_all_accumulated(coords: tuple, days: int) -> dict:
+    # coords: tuple of (code, lat, lon)
+    return {
+        code: get_accumulated(lat, lon, days)
+        for code, lat, lon in coords
+    }
 
 
 progress = st.progress(0, text=f"Calculando acumulado dos últimos {period} dias...")
-codes = tuple(stations_df["CD_ESTACAO"].tolist())
-accumulated = load_all_accumulated(codes, period)
+coords = tuple(
+    (row["CD_ESTACAO"], row["VL_LATITUDE"], row["VL_LONGITUDE"])
+    for _, row in stations_df.iterrows()
+)
+accumulated = load_all_accumulated(coords, period)
 progress.empty()
 
 stations_df["ACUMULADO_MM"] = stations_df["CD_ESTACAO"].map(accumulated).fillna(0)
@@ -207,8 +214,9 @@ with col_chart:
         clicked_name = stations_df.loc[idx, "DC_NOME"]
         st.info("Clique no mapa para selecionar uma estação.")
 
+    sel = stations_df[stations_df["CD_ESTACAO"] == clicked_code].iloc[0]
     with st.spinner(f"Carregando dados de {clicked_name}..."):
-        daily_df = get_daily_series(clicked_code, period)
+        daily_df = get_daily_series(sel["VL_LATITUDE"], sel["VL_LONGITUDE"], period)
 
     total_mm = daily_df["Precipitação (mm)"].sum() if not daily_df.empty else 0
     st.metric(
@@ -298,7 +306,6 @@ with col_bar:
 # ── Rodapé ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.caption(
-    "Fonte: INMET — Instituto Nacional de Meteorologia · "
-    "[apitempo.inmet.gov.br](https://apitempo.inmet.gov.br) · "
-    "Dados brutos não validados · Uso informativo"
+    "Estações: INMET — Instituto Nacional de Meteorologia · "
+    "Precipitação: Open-Meteo (ERA5 + NWP) · Uso informativo"
 )
