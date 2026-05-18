@@ -107,19 +107,42 @@ stations_df["ACUMULADO_MM"] = stations_df["CD_ESTACAO"].map(accumulated).fillna(
 
 
 # ── Paleta de cores por intensidade ──────────────────────────────────────────
-def precip_color(mm: float) -> str:
+# Limiares: (limite_superior, cor) — último item é o "acima de tudo"
+SCALE_SHORT = [
+    (0,   "#CCCCCC", "Sem chuva"),
+    (10,  "#A8D8EA", "0 – 10 mm"),
+    (30,  "#4A90D9", "10 – 30 mm"),
+    (60,  "#1A5276", "30 – 60 mm"),
+    (100, "#E67E22", "60 – 100 mm"),
+    (None,"#C0392B", "> 100 mm"),
+]
+SCALE_FEB24 = [
+    (0,   "#CCCCCC", "Sem chuva"),
+    (100, "#A8D8EA", "0 – 100 mm"),
+    (250, "#4A90D9", "100 – 250 mm"),
+    (400, "#1A5276", "250 – 400 mm"),
+    (600, "#E67E22", "400 – 600 mm"),
+    (None,"#C0392B", "> 600 mm"),
+]
+
+def precip_color(mm: float, scale: list) -> str:
     if mm == 0:
-        return "#CCCCCC"
-    elif mm < 10:
-        return "#A8D8EA"
-    elif mm < 30:
-        return "#4A90D9"
-    elif mm < 60:
-        return "#1A5276"
-    elif mm < 100:
-        return "#E67E22"
-    else:
-        return "#C0392B"
+        return scale[0][1]
+    for limit, color, _ in scale[1:]:
+        if limit is None or mm < limit:
+            return color
+    return scale[-1][1]
+
+def build_legend(scale: list) -> str:
+    items = f'<span style="color:{scale[0][1]};font-size:18px">●</span> {scale[0][2]}<br>'
+    for _, color, label in scale[1:]:
+        items += f'<span style="color:{color};font-size:18px">●</span> {label}<br>'
+    return (
+        '<div style="position:fixed;bottom:30px;left:30px;z-index:1000;'
+        'background:white;padding:12px 16px;border-radius:10px;'
+        'box-shadow:0 2px 8px rgba(0,0,0,0.25);font-size:13px;line-height:1.8;">'
+        f'<b>Acumulado (mm)</b><br>{items}</div>'
+    )
 
 
 # ── Métricas resumidas ────────────────────────────────────────────────────────
@@ -157,9 +180,11 @@ with col_map:
         tiles="CartoDB positron",
     )
 
+    scale = SCALE_FEB24 if period == 0 else SCALE_SHORT
+
     for _, row in stations_df.iterrows():
         mm = row["ACUMULADO_MM"]
-        color = precip_color(mm)
+        color = precip_color(mm, scale)
         folium.CircleMarker(
             location=[row["VL_LATITUDE"], row["VL_LONGITUDE"]],
             radius=11,
@@ -183,20 +208,8 @@ with col_map:
             ),
         ).add_to(m)
 
-    # Legenda
-    legend_html = """
-    <div style="position:fixed;bottom:30px;left:30px;z-index:1000;
-         background:white;padding:12px 16px;border-radius:10px;
-         box-shadow:0 2px 8px rgba(0,0,0,0.25);font-size:13px;line-height:1.8;">
-      <b>Acumulado (mm)</b><br>
-      <span style="color:#CCCCCC;font-size:18px">●</span> Sem chuva<br>
-      <span style="color:#A8D8EA;font-size:18px">●</span> 0 – 10 mm<br>
-      <span style="color:#4A90D9;font-size:18px">●</span> 10 – 30 mm<br>
-      <span style="color:#1A5276;font-size:18px">●</span> 30 – 60 mm<br>
-      <span style="color:#E67E22;font-size:18px">●</span> 60 – 100 mm<br>
-      <span style="color:#C0392B;font-size:18px">●</span> &gt; 100 mm
-    </div>
-    """
+    # Legenda dinâmica conforme escala do período
+    legend_html = build_legend(scale)
     m.get_root().html.add_child(folium.Element(legend_html))
 
     map_result = st_folium(m, width=700, height=520, returned_objects=["last_object_clicked_popup"])
