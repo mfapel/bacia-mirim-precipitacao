@@ -7,7 +7,6 @@ import streamlit as st
 import folium
 from streamlit_folium import st_folium
 import plotly.graph_objects as go
-import plotly.express as px
 import pandas as pd
 from datetime import datetime, date
 
@@ -274,56 +273,6 @@ with col_chart:
         )
         st.plotly_chart(fig, use_container_width=True)
 
-# ── Tabela comparativa ────────────────────────────────────────────────────────
-st.markdown("---")
-st.subheader("Comparativo — Todas as Estações")
-
-summary = (
-    stations_df[["DC_NOME", "CD_ESTACAO", "VL_LATITUDE", "VL_LONGITUDE", "ACUMULADO_MM"]]
-    .copy()
-    .rename(
-        columns={
-            "DC_NOME": "Estação",
-            "CD_ESTACAO": "Código",
-            "VL_LATITUDE": "Latitude",
-            "VL_LONGITUDE": "Longitude",
-            "ACUMULADO_MM": "Acumulado (mm)",
-        }
-    )
-    .sort_values("Acumulado (mm)", ascending=False)
-    .reset_index(drop=True)
-)
-
-col_tbl, col_bar = st.columns([2, 3])
-
-with col_tbl:
-    styled = (
-        summary.style.background_gradient(subset=["Acumulado (mm)"], cmap="Blues")
-        if summary["Acumulado (mm)"].max() > 0
-        else summary.style
-    )
-    st.dataframe(styled, use_container_width=True, hide_index=True)
-
-with col_bar:
-    fig_bar = px.bar(
-        summary.head(15),
-        x="Acumulado (mm)",
-        y="Estação",
-        orientation="h",
-        color="Acumulado (mm)",
-        color_continuous_scale="Blues",
-        labels={"Acumulado (mm)": "mm"},
-        title=f"Top 15 — Acumulado últimos {period_days} dias",
-    )
-    fig_bar.update_layout(
-        height=420,
-        margin=dict(l=0, r=0, t=40, b=0),
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        coloraxis_showscale=False,
-        yaxis=dict(autorange="reversed"),
-    )
-    st.plotly_chart(fig_bar, use_container_width=True)
 
 # ── Rodapé ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
