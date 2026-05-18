@@ -33,10 +33,7 @@ st.markdown(
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.image(
-        "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/INMET_logo.svg/200px-INMET_logo.svg.png",
-        width=120,
-    )
+    st.image("logo.png", width=180)
     st.title("Bacia Mirim")
     st.caption("Monitoramento de precipitação")
 
