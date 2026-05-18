@@ -9,7 +9,7 @@ from streamlit_folium import st_folium
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 
 from inmet_api import get_stations, get_accumulated, get_daily_series
 
@@ -37,12 +37,23 @@ with st.sidebar:
     st.title("Bacia Mirim")
     st.caption("Monitoramento de precipitação")
 
+    PERIOD_LABELS = {
+        1: "Últimas 24h",
+        3: "Últimos 3 dias",
+        7: "Últimos 7 dias",
+        15: "Últimos 15 dias",
+        30: "Últimos 30 dias",
+        0: "Acumulado desde 24fev",
+    }
     period = st.selectbox(
         "Período de análise",
-        options=[1, 3, 7, 15, 30],
+        options=list(PERIOD_LABELS.keys()),
         index=2,
-        format_func=lambda x: f"Últimos {x} dias",
+        format_func=lambda x: PERIOD_LABELS[x],
     )
+    # Converte período especial (0) em número de dias desde 24/02/2026
+    FEB24 = date(2026, 2, 24)
+    period_days = (date.today() - FEB24).days if period == 0 else period
 
     st.markdown("---")
     st.markdown("**Dados:** Estações automáticas INMET")
@@ -84,12 +95,12 @@ def load_all_accumulated(coords: tuple, days: int) -> dict:
     }
 
 
-progress = st.progress(0, text=f"Calculando acumulado dos últimos {period} dias...")
+progress = st.progress(0, text=f"Calculando acumulado dos últimos {period_days} dias...")
 coords = tuple(
     (row["CD_ESTACAO"], row["VL_LATITUDE"], row["VL_LONGITUDE"])
     for _, row in stations_df.iterrows()
 )
-accumulated = load_all_accumulated(coords, period)
+accumulated = load_all_accumulated(coords, period_days)
 progress.empty()
 
 stations_df["ACUMULADO_MM"] = stations_df["CD_ESTACAO"].map(accumulated).fillna(0)
@@ -167,7 +178,7 @@ with col_map:
                 f"<b>{row['DC_NOME']}</b><br>"
                 f"Código: {row['CD_ESTACAO']}<br>"
                 f"Lat: {row['VL_LATITUDE']:.4f} | Lon: {row['VL_LONGITUDE']:.4f}<br>"
-                f"Acumulado {period}d: <b>{mm:.1f} mm</b>",
+                f"Acumulado {period_days}d: <b>{mm:.1f} mm</b>",
                 max_width=220,
             ),
         ).add_to(m)
@@ -213,7 +224,7 @@ with col_chart:
 
     sel = stations_df[stations_df["CD_ESTACAO"] == clicked_code].iloc[0]
     with st.spinner(f"Carregando dados de {clicked_name}..."):
-        daily_df = get_daily_series(sel["VL_LATITUDE"], sel["VL_LONGITUDE"], period)
+        daily_df = get_daily_series(sel["VL_LATITUDE"], sel["VL_LONGITUDE"], period_days)
 
     total_mm = daily_df["Precipitação (mm)"].sum() if not daily_df.empty else 0
     st.metric(
@@ -288,7 +299,7 @@ with col_bar:
         color="Acumulado (mm)",
         color_continuous_scale="Blues",
         labels={"Acumulado (mm)": "mm"},
-        title=f"Top 15 — Acumulado últimos {period} dias",
+        title=f"Top 15 — Acumulado últimos {period_days} dias",
     )
     fig_bar.update_layout(
         height=420,
