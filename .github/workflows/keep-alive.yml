@@ -1,0 +1,15 @@
+name: Keep app alive
+
+on:
+  schedule:
+    - cron: "0 9 */5 * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Streamlit app
+        run: |
+          curl -s -o /dev/null -w "HTTP %{http_code}" https://bacia-mirim.streamlit.app/
+          echo " — app pinged successfully"
