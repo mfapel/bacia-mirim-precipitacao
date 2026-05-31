@@ -2,7 +2,7 @@ name: Keep app alive
 
 on:
   schedule:
-    - cron: "0 9 */5 * *"
+  - cron: "0 9 * * *"
   workflow_dispatch:
 
 jobs:
