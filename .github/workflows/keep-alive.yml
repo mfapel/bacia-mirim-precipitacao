@@ -2,14 +2,40 @@ name: Keep app alive
 
 on:
   schedule:
-  - cron: "15 4 * * *"
+    - cron: "0 9 * * *"   # diariamente às 09h UTC
   workflow_dispatch:
 
 jobs:
-  ping:
+  wake-up:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Streamlit app
+      - name: Install Playwright
         run: |
-          curl -s -o /dev/null -w "HTTP %{http_code}" https://bacia-mirim.streamlit.app/
-          echo " — app pinged successfully"
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: Wake up Streamlit app
+        run: |
+          python3 << 'EOF'
+          from playwright.sync_api import sync_playwright
+          import time
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch()
+              page = browser.new_page()
+              print("Acessando o app...")
+              page.goto("https://bacia-mirim.streamlit.app/", timeout=60000)
+              time.sleep(5)
+              try:
+                  btn = page.get_by_role("button", name="Yes, get this app back up!")
+                  if btn.is_visible():
+                      print("App dormindo — acordando...")
+                      btn.click()
+                      time.sleep(10)
+                      print("App acordado!")
+                  else:
+                      print("App já estava ativo!")
+              except Exception as e:
+                  print(f"App ativo ou erro ignorado: {e}")
+              browser.close()
+          EOF
