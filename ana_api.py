@@ -102,10 +102,11 @@ def get_nivel_atual(cod: str) -> dict:
 SANGRADOURO_LAT    = -32.121142
 SANGRADOURO_LON    = -52.599856
 SANGRADOURO_NOME   = "Sangradouro — Santa Isabel"
-CALIB_NIVEL_REF    = 13.0    # cm (Eclusa São Gonçalo em 24/02/2026 11:15)
-CALIB_PROF_REF     = 100.0   # cm (medição in loco em 24/02/2026 11:20)
-OFFSET             = CALIB_PROF_REF - CALIB_NIVEL_REF   # = 87 cm (Modelo A)
-CALIB_DEPTH_MIN_CM = 0.0     # cm — assumido: Sangradouro seco no mínimo histórico
+CALIB_NIVEL_REF       = 13.0    # cm (Eclusa São Gonçalo em 24/02/2026 11:15)
+CALIB_PROF_REF        = 100.0   # cm (medição in loco em 24/02/2026 11:20)
+OFFSET                = CALIB_PROF_REF - CALIB_NIVEL_REF   # = 87 cm (Modelo A)
+CALIB_DEPTH_MIN_CM    = 0.0     # cm — assumido: Sangradouro seco no mínimo histórico
+CALIB_INCERTEZA_CM    = 15.0    # cm — incerteza estimada da medição in loco (±15 cm)
 
 
 # ── Modelo A (k=1, mantido para comparação / fallback) ────────────────────────
@@ -135,62 +136,39 @@ def get_sangradouro_serie(days: int = 30) -> pd.DataFrame:
 
 # ── Modelo B (2 pontos: calibração + mínimo histórico) ───────────────────────
 
-def _kb_from_threshold(nivel_seco: float) -> tuple[float, float] | None:
-    """Calcula (k, b) para um threshold de secagem. Retorna None se inválido."""
-    if nivel_seco >= CALIB_NIVEL_REF:
-        return None
-    k = (CALIB_PROF_REF - CALIB_DEPTH_MIN_CM) / (CALIB_NIVEL_REF - nivel_seco)
-    b = CALIB_PROF_REF - k * CALIB_NIVEL_REF
-    return round(k, 3), round(b, 1)
-
-
 @st.cache_data(ttl=86400, show_spinner=False)   # recalcula 1×/dia
 def calibrar_modelo_b(dias_historico: int = 180) -> dict:
     """
-    Estima slope k (modelo central, p05) e faixa de incerteza (p01–p10).
-
-    Faixa de incerteza: reflete a incerteza epistêmica sobre qual nível
-    corresponde ao Sangradouro seco — p01 (threshold mais baixo → k maior)
-    e p10 (threshold mais alto → k menor) são os limites plausíveis.
-
-    Retorna dict com: k, b, nivel_seco (p05),
-                      k_p01, b_p01, k_p10, b_p10,
-                      nivel_seco_p01, nivel_seco_p10,
-                      n_leituras, metodo
+    Estima slope k usando p05 histórico como threshold de secagem.
+    Retorna dict com: k, b, nivel_seco, n_leituras, metodo
     """
     df = get_nivel_serie("88690050", days=dias_historico)
     if not df.empty:
         df = df[df["Nivel_cm"] > 0]
 
-    fallback = {
-        "k": 1.0, "b": float(OFFSET), "nivel_seco": float(-OFFSET),
-        "k_p01": 1.0, "b_p01": float(OFFSET),
-        "k_p10": 1.0, "b_p10": float(OFFSET),
-        "nivel_seco_p01": float(-OFFSET), "nivel_seco_p10": float(-OFFSET),
-        "n_leituras": 0, "metodo": "fallback_k1",
-    }
-
     if df.empty or len(df) < 20:
-        return fallback
+        return {
+            "k": 1.0, "b": float(OFFSET),
+            "nivel_seco": float(-OFFSET),
+            "n_leituras": 0, "metodo": "fallback_k1",
+        }
 
-    p01  = float(df["Nivel_cm"].quantile(0.01))
-    p05  = float(df["Nivel_cm"].quantile(0.05))
-    p10  = float(df["Nivel_cm"].quantile(0.10))
+    nivel_seco = float(df["Nivel_cm"].quantile(0.05))
 
-    kb_central = _kb_from_threshold(p05)
-    if kb_central is None:
-        fallback.update({"nivel_seco": round(p05, 1), "n_leituras": int(len(df)),
-                         "metodo": "fallback_k1_sem_variacao"})
-        return fallback
+    if nivel_seco >= CALIB_NIVEL_REF:
+        return {
+            "k": 1.0, "b": float(OFFSET),
+            "nivel_seco": round(nivel_seco, 1),
+            "n_leituras": int(len(df)), "metodo": "fallback_k1_sem_variacao",
+        }
 
-    k_c, b_c = kb_central
-    kb_p01 = _kb_from_threshold(p01) or (k_c, b_c)
-    kb_p10 = _kb_from_threshold(p10) or (k_c, b_c)
+    k = (CALIB_PROF_REF - CALIB_DEPTH_MIN_CM) / (CALIB_NIVEL_REF - nivel_seco)
+    b = CALIB_PROF_REF - k * CALIB_NIVEL_REF
 
     return {
-        "k": k_c,      "b": b_c,      "nivel_seco": round(p05, 1),
-        "k_p01": kb_p01[0], "b_p01": kb_p01[1], "nivel_seco_p01": round(p01, 1),
-        "k_p10": kb_p10[0], "b_p10": kb_p10[1], "nivel_seco_p10": round(p10, 1),
+        "k": round(k, 3),
+        "b": round(b, 1),
+        "nivel_seco": round(nivel_seco, 1),
         "n_leituras": int(len(df)),
         "metodo": "opcao_b_2pontos",
     }
@@ -213,12 +191,12 @@ def estimar_sangradouro_b(nivel_sg_cm: float, modelo: dict) -> dict:
 @st.cache_data(ttl=900, show_spinner=False)
 def get_sangradouro_serie_b(days: int = 30) -> pd.DataFrame:
     """
-    Série temporal — Modelo B com faixa de incerteza p01–p10.
+    Série temporal — Modelo B com faixa de incerteza ±CALIB_INCERTEZA_CM.
 
-    Faixa de incerteza (não IC estatístico clássico):
-      Limite inferior: modelo calibrado com p10 como threshold de secagem
-      Limite superior: modelo calibrado com p01 como threshold de secagem
-    Captura a incerteza epistêmica sobre quando exatamente o Sangradouro seca.
+    Faixa: propagação direta da incerteza da medição in loco (±15 cm).
+    prof_low  = prof_B − 15 cm  (se medição fosse 85 cm)
+    prof_high = prof_B + 15 cm  (se medição fosse 115 cm)
+    Resulta em banda constante e visível, interpretável fisicamente.
     """
     df = get_nivel_serie("88690050", days=days)
     if df.empty:
@@ -228,15 +206,14 @@ def get_sangradouro_serie_b(days: int = 30) -> pd.DataFrame:
     nivel = df["Nivel_cm"]
 
     df["Prof_est_cm_A"] = (nivel + OFFSET).clip(lower=0)
-    df["Prof_est_cm_B"] = (modelo["k"]    * nivel + modelo["b"]).clip(lower=0)
+    df["Prof_est_cm_B"] = (modelo["k"] * nivel + modelo["b"]).clip(lower=0)
     df["Prof_est_m_A"]  = df["Prof_est_cm_A"] / 100
     df["Prof_est_m_B"]  = df["Prof_est_cm_B"] / 100
 
-    # Faixa de incerteza: limites p01 e p10
-    prof_p01 = (modelo["k_p01"] * nivel + modelo["b_p01"]).clip(lower=0) / 100
-    prof_p10 = (modelo["k_p10"] * nivel + modelo["b_p10"]).clip(lower=0) / 100
-    df["Prof_ci_low_m"]  = np.minimum(prof_p01, prof_p10)
-    df["Prof_ci_high_m"] = np.maximum(prof_p01, prof_p10)
+    # Faixa ±CALIB_INCERTEZA_CM — propagação da incerteza da medição de campo
+    delta_m = CALIB_INCERTEZA_CM / 100
+    df["Prof_ci_low_m"]  = (df["Prof_est_m_B"] - delta_m).clip(lower=0)
+    df["Prof_ci_high_m"] = df["Prof_est_m_B"] + delta_m
 
     return df[["DataHora", "Nivel_cm",
                "Prof_est_cm_A", "Prof_est_cm_B",

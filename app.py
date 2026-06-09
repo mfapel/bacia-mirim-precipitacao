@@ -16,7 +16,7 @@ from ana_api import (get_nivel_serie, get_nivel_atual, ESTACOES_NIVEL,
                      estimar_sangradouro, get_sangradouro_serie,
                      estimar_sangradouro_b, get_sangradouro_serie_b, calibrar_modelo_b,
                      SANGRADOURO_NOME, SANGRADOURO_LAT, SANGRADOURO_LON,
-                     CALIB_NIVEL_REF, CALIB_PROF_REF, OFFSET)
+                     CALIB_NIVEL_REF, CALIB_PROF_REF, OFFSET, CALIB_INCERTEZA_CM)
 
 # ── Carrega sub-bacias ────────────────────────────────────────────────────────
 @st.cache_data
@@ -474,19 +474,16 @@ sc1, sc2, sc3 = st.columns(3)
 if sg:
     est_b  = estimar_sangradouro_b(sg['nivel_cm'], modelo_b)
     prof_m = est_b['profundidade_cm'] / 100
-
-    # Faixa de incerteza para o valor atual
-    nivel  = sg['nivel_cm']
-    ci_a   = max(0.0, modelo_b["k_p01"] * nivel + modelo_b["b_p01"]) / 100
-    ci_b   = max(0.0, modelo_b["k_p10"] * nivel + modelo_b["b_p10"]) / 100
-    ci_low, ci_high = min(ci_a, ci_b), max(ci_a, ci_b)
+    delta_m = CALIB_INCERTEZA_CM / 100
+    ci_low  = max(0.0, prof_m - delta_m)
+    ci_high = prof_m + delta_m
 
     sc1.metric(
         "Profundidade estimada",
         f"{prof_m:.2f} m",
         delta=f"faixa: {ci_low:.2f} – {ci_high:.2f} m",
         delta_color="off",
-        help="Estimativa central (p05) · Faixa de incerteza baseada em p01–p10 como limites do threshold de secagem",
+        help=f"Faixa ±{CALIB_INCERTEZA_CM:.0f} cm — propagação da incerteza da medição in loco (24/02/2026)",
     )
     sc2.metric(
         "Status",
@@ -559,7 +556,7 @@ else:
                 line=dict(color="rgba(17,122,101,0.35)"),
                 hoverinfo="skip",
                 showlegend=True,
-                name="Faixa de incerteza (p01–p10)",
+                name=f"Faixa ±{CALIB_INCERTEZA_CM:.0f} cm (incerteza da medição)",
             ))
 
         # Modelo B — linha principal
@@ -603,11 +600,11 @@ else:
         )
         st.plotly_chart(fig_sang, use_container_width=True)
         st.caption(
-            "Série desde 01/02/2026 · "
-            "Banda verde = faixa de incerteza (p01–p10 como limites do threshold de secagem) · "
-            "◆ Ponto vermelho = medição in loco (24/02/2026, 1,00 m) · "
-            "Linha tracejada = Modelo A (k=1) · "
-            "Faixa captura a incerteza epistêmica sobre quando o Sangradouro seca."
+            f"Série desde 01/02/2026 · "
+            f"Banda verde = faixa ±{CALIB_INCERTEZA_CM:.0f} cm "
+            f"(propagação da incerteza da medição in loco de 24/02/2026) · "
+            f"◆ Ponto vermelho = medição de campo (1,00 m) · "
+            f"Linha tracejada = Modelo A (k=1, referência)."
         )
     else:
         st.warning("Sem dados disponíveis para o Sangradouro.")
