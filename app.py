@@ -12,6 +12,7 @@ import json
 from datetime import datetime, date
 
 from inmet_api import get_stations, get_accumulated, get_daily_series
+from ana_api import get_nivel_serie, get_nivel_atual, ESTACOES_NIVEL
 
 # ── Carrega sub-bacias ────────────────────────────────────────────────────────
 @st.cache_data
@@ -164,7 +165,110 @@ def build_legend(scale: list) -> str:
     )
 
 
-# ── Métricas resumidas ────────────────────────────────────────────────────────
+# ── Nível da Lagoa Mirim — indicadores em tempo real ─────────────────────────
+st.subheader("🌊 Nível da Lagoa Mirim")
+st.caption("Fonte: ANA — Telemetria automática · Atualização a cada 15 min")
+
+nivel_cols = st.columns(4)
+
+# Eclusa São Gonçalo — proxy direto do nível da lagoa
+with st.spinner("Buscando nível atual..."):
+    sg = get_nivel_atual("88690050")
+    pp = get_nivel_atual("88260000")
+
+if sg:
+    nivel_cols[0].metric(
+        "Nível — Eclusa São Gonçalo",
+        f"{sg['nivel_cm']:.0f} cm",
+        help="Proxy do nível da Lagoa Mirim na saída para Lagoa dos Patos",
+    )
+    nivel_cols[1].metric(
+        "Última leitura",
+        sg['data_hora'].strftime("%d/%m %H:%M") if pd.notna(sg['data_hora']) else "—",
+    )
+if pp:
+    nivel_cols[2].metric(
+        "Nível — Rio Jaguarão (Passo Pedras)",
+        f"{pp['nivel_cm']:.0f} cm",
+        help="Nível do principal afluente da Lagoa Mirim",
+    )
+    nivel_cols[3].metric(
+        "Vazão — Rio Jaguarão",
+        f"{pp['vazao_m3s']:.1f} m³/s" if pp.get('vazao_m3s') and pd.notna(pp['vazao_m3s']) else "—",
+    )
+
+st.markdown("---")
+
+# ── Gráficos de nível ─────────────────────────────────────────────────────────
+st.subheader("📈 Série Temporal de Nível")
+nivel_period = st.select_slider(
+    "Período",
+    options=[7, 15, 30, 60, 90],
+    value=30,
+    format_func=lambda x: f"{x} dias",
+)
+
+ncol1, ncol2 = st.columns(2)
+
+with ncol1:
+    st.markdown("**Eclusa São Gonçalo** · nível da Lagoa Mirim")
+    with st.spinner("Carregando..."):
+        df_sg = get_nivel_serie("88690050", days=nivel_period)
+    if not df_sg.empty:
+        fig_sg = go.Figure()
+        fig_sg.add_trace(go.Scatter(
+            x=df_sg["DataHora"], y=df_sg["Nivel_cm"],
+            mode="lines", line=dict(color="#1A5276", width=1.5),
+            name="Nível (cm)",
+            hovertemplate="%{x|%d/%m %H:%M}<br>Nível: %{y:.0f} cm<extra></extra>",
+        ))
+        fig_sg.update_layout(
+            yaxis_title="Nível (cm)", xaxis_title=None,
+            height=300, margin=dict(l=0, r=0, t=10, b=0),
+            plot_bgcolor="white", paper_bgcolor="white",
+            yaxis=dict(gridcolor="#EEEEEE"),
+            xaxis=dict(gridcolor="#EEEEEE"),
+            showlegend=False,
+        )
+        st.plotly_chart(fig_sg, use_container_width=True)
+    else:
+        st.warning("Sem dados disponíveis.")
+
+with ncol2:
+    st.markdown("**Passo das Pedras** · Rio Jaguarão — nível e vazão")
+    with st.spinner("Carregando..."):
+        df_pp = get_nivel_serie("88260000", days=nivel_period)
+    if not df_pp.empty:
+        fig_pp = go.Figure()
+        fig_pp.add_trace(go.Scatter(
+            x=df_pp["DataHora"], y=df_pp["Nivel_cm"],
+            mode="lines", line=dict(color="#E15759", width=1.5),
+            name="Nível (cm)", yaxis="y",
+            hovertemplate="%{x|%d/%m %H:%M}<br>Nível: %{y:.0f} cm<extra></extra>",
+        ))
+        if df_pp["Vazao_m3s"].notna().any():
+            fig_pp.add_trace(go.Scatter(
+                x=df_pp["DataHora"], y=df_pp["Vazao_m3s"],
+                mode="lines", line=dict(color="#4A90D9", width=1.5, dash="dot"),
+                name="Vazão (m³/s)", yaxis="y2",
+                hovertemplate="%{x|%d/%m %H:%M}<br>Vazão: %{y:.1f} m³/s<extra></extra>",
+            ))
+        fig_pp.update_layout(
+            yaxis=dict(title="Nível (cm)", gridcolor="#EEEEEE", color="#E15759"),
+            yaxis2=dict(title="Vazão (m³/s)", overlaying="y", side="right",
+                        color="#4A90D9", showgrid=False),
+            xaxis=dict(gridcolor="#EEEEEE"),
+            height=300, margin=dict(l=0, r=0, t=10, b=0),
+            plot_bgcolor="white", paper_bgcolor="white",
+            legend=dict(x=0.01, y=0.99, bgcolor="rgba(255,255,255,0.8)"),
+        )
+        st.plotly_chart(fig_pp, use_container_width=True)
+    else:
+        st.warning("Sem dados disponíveis.")
+
+st.markdown("---")
+
+# ── Métricas de precipitação ──────────────────────────────────────────────────
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Estações monitoradas", len(stations_df))
 col2.metric(
