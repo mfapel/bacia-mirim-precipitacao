@@ -559,6 +559,17 @@ else:
                 name=f"Faixa ±{CALIB_INCERTEZA_CM:.0f} cm (incerteza da medição)",
             ))
 
+        # Linha de controle — nível alvo para nova medição de campo
+        CONTROLE_M = 2.5
+        x_range = [pd.Timestamp("2026-02-01"), pd.Timestamp(date.today())]
+        fig_sang.add_trace(go.Scatter(
+            x=x_range, y=[CONTROLE_M, CONTROLE_M],
+            mode="lines",
+            line=dict(color="#E67E22", width=1.5, dash="dot"),
+            name=f"Controle — nova medição ({CONTROLE_M:.1f} m)",
+            hovertemplate=f"Nível de controle: {CONTROLE_M:.1f} m<extra></extra>",
+        ))
+
         # Modelo B — linha principal
         fig_sang.add_trace(go.Scatter(
             x=df_sang["DataHora"], y=df_sang["Prof_est_m_B"],
