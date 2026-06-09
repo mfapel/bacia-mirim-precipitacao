@@ -135,43 +135,62 @@ def get_sangradouro_serie(days: int = 30) -> pd.DataFrame:
 
 # ── Modelo B (2 pontos: calibração + mínimo histórico) ───────────────────────
 
+def _kb_from_threshold(nivel_seco: float) -> tuple[float, float] | None:
+    """Calcula (k, b) para um threshold de secagem. Retorna None se inválido."""
+    if nivel_seco >= CALIB_NIVEL_REF:
+        return None
+    k = (CALIB_PROF_REF - CALIB_DEPTH_MIN_CM) / (CALIB_NIVEL_REF - nivel_seco)
+    b = CALIB_PROF_REF - k * CALIB_NIVEL_REF
+    return round(k, 3), round(b, 1)
+
+
 @st.cache_data(ttl=86400, show_spinner=False)   # recalcula 1×/dia
 def calibrar_modelo_b(dias_historico: int = 180) -> dict:
     """
-    Estima slope k a partir de dois pontos de calibração:
-      P1: (CALIB_NIVEL_REF, CALIB_PROF_REF)  — medição in loco
-      P2: (percentil 5 histórico, 0 cm)       — mínimo histórico ≈ seco
+    Estima slope k (modelo central, p05) e faixa de incerteza (p01–p10).
 
-    Retorna dict com: k, b, nivel_seco, n_leituras, metodo
+    Faixa de incerteza: reflete a incerteza epistêmica sobre qual nível
+    corresponde ao Sangradouro seco — p01 (threshold mais baixo → k maior)
+    e p10 (threshold mais alto → k menor) são os limites plausíveis.
+
+    Retorna dict com: k, b, nivel_seco (p05),
+                      k_p01, b_p01, k_p10, b_p10,
+                      nivel_seco_p01, nivel_seco_p10,
+                      n_leituras, metodo
     """
     df = get_nivel_serie("88690050", days=dias_historico)
     if not df.empty:
         df = df[df["Nivel_cm"] > 0]
 
+    fallback = {
+        "k": 1.0, "b": float(OFFSET), "nivel_seco": float(-OFFSET),
+        "k_p01": 1.0, "b_p01": float(OFFSET),
+        "k_p10": 1.0, "b_p10": float(OFFSET),
+        "nivel_seco_p01": float(-OFFSET), "nivel_seco_p10": float(-OFFSET),
+        "n_leituras": 0, "metodo": "fallback_k1",
+    }
+
     if df.empty or len(df) < 20:
-        return {
-            "k": 1.0, "b": float(OFFSET),
-            "nivel_seco": float(-OFFSET),
-            "n_leituras": 0, "metodo": "fallback_k1",
-        }
+        return fallback
 
-    nivel_seco = float(df["Nivel_cm"].quantile(0.05))
+    p01  = float(df["Nivel_cm"].quantile(0.01))
+    p05  = float(df["Nivel_cm"].quantile(0.05))
+    p10  = float(df["Nivel_cm"].quantile(0.10))
 
-    if nivel_seco >= CALIB_NIVEL_REF:
-        # Série sem variação abaixo do ponto de calibração → k=1
-        return {
-            "k": 1.0, "b": float(OFFSET),
-            "nivel_seco": round(nivel_seco, 1),
-            "n_leituras": int(len(df)), "metodo": "fallback_k1_sem_variacao",
-        }
+    kb_central = _kb_from_threshold(p05)
+    if kb_central is None:
+        fallback.update({"nivel_seco": round(p05, 1), "n_leituras": int(len(df)),
+                         "metodo": "fallback_k1_sem_variacao"})
+        return fallback
 
-    k = (CALIB_PROF_REF - CALIB_DEPTH_MIN_CM) / (CALIB_NIVEL_REF - nivel_seco)
-    b = CALIB_PROF_REF - k * CALIB_NIVEL_REF   # = -k × nivel_seco
+    k_c, b_c = kb_central
+    kb_p01 = _kb_from_threshold(p01) or (k_c, b_c)
+    kb_p10 = _kb_from_threshold(p10) or (k_c, b_c)
 
     return {
-        "k": round(k, 3),
-        "b": round(b, 1),
-        "nivel_seco": round(nivel_seco, 1),
+        "k": k_c,      "b": b_c,      "nivel_seco": round(p05, 1),
+        "k_p01": kb_p01[0], "b_p01": kb_p01[1], "nivel_seco_p01": round(p01, 1),
+        "k_p10": kb_p10[0], "b_p10": kb_p10[1], "nivel_seco_p10": round(p10, 1),
         "n_leituras": int(len(df)),
         "metodo": "opcao_b_2pontos",
     }
@@ -191,60 +210,33 @@ def estimar_sangradouro_b(nivel_sg_cm: float, modelo: dict) -> dict:
     }
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def _bootstrap_sigma_k(n_boot: int = 2000) -> float:
-    """
-    Bootstrap de σ(k): incerteza do slope estimado via variabilidade do p05 histórico.
-    Usa semente fixa para reprodutibilidade. Cache 24h.
-
-    Base analítica:
-        k = CALIB_PROF_REF / (CALIB_NIVEL_REF − p05)
-        σ_prof(nivel_SG) = σ_k × |nivel_SG − CALIB_NIVEL_REF|
-    """
-    df = get_nivel_serie("88690050", days=180)
-    if df.empty:
-        return 0.0
-    hist = df[df["Nivel_cm"] > 0]["Nivel_cm"].values
-    if len(hist) < 20:
-        return 0.0
-
-    rng = np.random.default_rng(42)
-    k_samples = []
-    for _ in range(n_boot):
-        sample = rng.choice(hist, size=len(hist), replace=True)
-        p05 = float(np.percentile(sample, 5))
-        if p05 < CALIB_NIVEL_REF:
-            k_samples.append(CALIB_PROF_REF / (CALIB_NIVEL_REF - p05))
-
-    return float(np.std(k_samples)) if len(k_samples) > 10 else 0.0
-
-
 @st.cache_data(ttl=900, show_spinner=False)
 def get_sangradouro_serie_b(days: int = 30) -> pd.DataFrame:
     """
-    Série temporal — Modelo B com IC 95% bootstrap.
+    Série temporal — Modelo B com faixa de incerteza p01–p10.
 
-    Intervalo de confiança analítico:
-        σ_prof = σ_k × |nivel_SG − CALIB_NIVEL_REF|
-        IC 95% = prof_B ± 1.96 × σ_prof
-    O intervalo é zero no ponto de calibração e cresce com a distância dele.
+    Faixa de incerteza (não IC estatístico clássico):
+      Limite inferior: modelo calibrado com p10 como threshold de secagem
+      Limite superior: modelo calibrado com p01 como threshold de secagem
+    Captura a incerteza epistêmica sobre quando exatamente o Sangradouro seca.
     """
     df = get_nivel_serie("88690050", days=days)
     if df.empty:
         return pd.DataFrame()
     modelo = calibrar_modelo_b()
     df = df[df["Nivel_cm"] > 0].copy()
+    nivel = df["Nivel_cm"]
 
-    df["Prof_est_cm_A"] = (df["Nivel_cm"] + OFFSET).clip(lower=0)
-    df["Prof_est_cm_B"] = (modelo["k"] * df["Nivel_cm"] + modelo["b"]).clip(lower=0)
+    df["Prof_est_cm_A"] = (nivel + OFFSET).clip(lower=0)
+    df["Prof_est_cm_B"] = (modelo["k"]    * nivel + modelo["b"]).clip(lower=0)
     df["Prof_est_m_A"]  = df["Prof_est_cm_A"] / 100
     df["Prof_est_m_B"]  = df["Prof_est_cm_B"] / 100
 
-    # IC 95% — propagação analítica da incerteza de k
-    sigma_k  = _bootstrap_sigma_k()
-    half_ci  = 1.96 * sigma_k * (df["Nivel_cm"] - CALIB_NIVEL_REF).abs() / 100
-    df["Prof_ci_low_m"]  = (df["Prof_est_m_B"] - half_ci).clip(lower=0)
-    df["Prof_ci_high_m"] = df["Prof_est_m_B"] + half_ci
+    # Faixa de incerteza: limites p01 e p10
+    prof_p01 = (modelo["k_p01"] * nivel + modelo["b_p01"]).clip(lower=0) / 100
+    prof_p10 = (modelo["k_p10"] * nivel + modelo["b_p10"]).clip(lower=0) / 100
+    df["Prof_ci_low_m"]  = np.minimum(prof_p01, prof_p10)
+    df["Prof_ci_high_m"] = np.maximum(prof_p01, prof_p10)
 
     return df[["DataHora", "Nivel_cm",
                "Prof_est_cm_A", "Prof_est_cm_B",

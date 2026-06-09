@@ -472,11 +472,21 @@ st.caption(
 sc1, sc2, sc3 = st.columns(3)
 
 if sg:
-    est_b = estimar_sangradouro_b(sg['nivel_cm'], modelo_b)
+    est_b  = estimar_sangradouro_b(sg['nivel_cm'], modelo_b)
+    prof_m = est_b['profundidade_cm'] / 100
+
+    # Faixa de incerteza para o valor atual
+    nivel  = sg['nivel_cm']
+    ci_a   = max(0.0, modelo_b["k_p01"] * nivel + modelo_b["b_p01"]) / 100
+    ci_b   = max(0.0, modelo_b["k_p10"] * nivel + modelo_b["b_p10"]) / 100
+    ci_low, ci_high = min(ci_a, ci_b), max(ci_a, ci_b)
+
     sc1.metric(
         "Profundidade estimada",
-        f"{est_b['profundidade_cm'] / 100:.2f} m",
-        help="Profundidade no Sangradouro de Santa Isabel (ponto não monitorado)",
+        f"{prof_m:.2f} m",
+        delta=f"faixa: {ci_low:.2f} – {ci_high:.2f} m",
+        delta_color="off",
+        help="Estimativa central (p05) · Faixa de incerteza baseada em p01–p10 como limites do threshold de secagem",
     )
     sc2.metric(
         "Status",
@@ -545,11 +555,11 @@ else:
             fig_sang.add_trace(go.Scatter(
                 x=x_band, y=y_band,
                 fill="toself",
-                fillcolor="rgba(17,122,101,0.13)",
-                line=dict(color="rgba(255,255,255,0)"),
+                fillcolor="rgba(17,122,101,0.18)",
+                line=dict(color="rgba(17,122,101,0.35)"),
                 hoverinfo="skip",
                 showlegend=True,
-                name="IC 95% (incerteza do modelo)",
+                name="Faixa de incerteza (p01–p10)",
             ))
 
         # Modelo B — linha principal
@@ -594,10 +604,10 @@ else:
         st.plotly_chart(fig_sang, use_container_width=True)
         st.caption(
             "Série desde 01/02/2026 · "
-            "Banda verde = IC 95% (bootstrap 2000 reamostras do p05 histórico) · "
+            "Banda verde = faixa de incerteza (p01–p10 como limites do threshold de secagem) · "
             "◆ Ponto vermelho = medição in loco (24/02/2026, 1,00 m) · "
             "Linha tracejada = Modelo A (k=1) · "
-            "Intervalo é zero na calibração e cresce com a distância do ponto de referência."
+            "Faixa captura a incerteza epistêmica sobre quando o Sangradouro seca."
         )
     else:
         st.warning("Sem dados disponíveis para o Sangradouro.")
