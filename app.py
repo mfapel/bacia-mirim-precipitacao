@@ -12,7 +12,10 @@ import json
 from datetime import datetime, date
 
 from inmet_api import get_stations, get_accumulated, get_daily_series
-from ana_api import get_nivel_serie, get_nivel_atual, ESTACOES_NIVEL
+from ana_api import (get_nivel_serie, get_nivel_atual, ESTACOES_NIVEL,
+                     estimar_sangradouro, get_sangradouro_serie,
+                     SANGRADOURO_NOME, SANGRADOURO_LAT, SANGRADOURO_LON,
+                     CALIB_NIVEL_REF, CALIB_PROF_REF, OFFSET)
 
 # ── Carrega sub-bacias ────────────────────────────────────────────────────────
 @st.cache_data
@@ -268,6 +271,73 @@ with ncol2:
 
 st.markdown("---")
 
+# ── Sangradouro Santa Isabel — profundidade estimada ─────────────────────────
+st.subheader("📍 Sangradouro — Santa Isabel (estimativa)")
+st.caption(
+    "Ponto não monitorado · Profundidade estimada a partir do nível da Eclusa São Gonçalo · "
+    "Modelo calibrado com 1 medição in loco"
+)
+
+sc1, sc2, sc3 = st.columns(3)
+
+if sg:
+    est = estimar_sangradouro(sg['nivel_cm'])
+    sc1.metric(
+        "Profundidade estimada",
+        f"{est['profundidade_cm'] / 100:.2f} m",
+        help="Profundidade no Sangradouro de Santa Isabel (ponto não monitorado)",
+    )
+    sc2.metric(
+        "Status",
+        "🟢 Ativo" if est['ativo'] else "⚪ Seco",
+        help="Ativo = sangradouro com lâmina d'água",
+    )
+    sc3.metric(
+        "Nível ref. Eclusa São Gonçalo",
+        f"{sg['nivel_cm']:.0f} cm",
+        help=f"Nível usado como referência para estimativa (offset aplicado: {OFFSET:.0f} cm)",
+    )
+else:
+    st.warning("Dados da Eclusa São Gonçalo indisponíveis — estimativa não calculada.")
+
+with st.spinner("Carregando série do Sangradouro..."):
+    df_sang = get_sangradouro_serie(days=nivel_period)
+
+if not df_sang.empty:
+    fig_sang = go.Figure()
+    fig_sang.add_trace(go.Scatter(
+        x=df_sang["DataHora"],
+        y=df_sang["Prof_est_m"],
+        mode="lines",
+        fill="tozeroy",
+        line=dict(color="#8E44AD", width=1.5),
+        fillcolor="rgba(142,68,173,0.12)",
+        name="Profundidade estimada (m)",
+        hovertemplate="%{x|%d/%m %H:%M}<br>Prof. estimada: %{y:.2f} m<extra></extra>",
+    ))
+    fig_sang.update_layout(
+        yaxis_title="Profundidade estimada (m)",
+        xaxis_title=None,
+        height=280,
+        margin=dict(l=0, r=0, t=10, b=0),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        yaxis=dict(gridcolor="#EEEEEE", rangemode="tozero"),
+        xaxis=dict(gridcolor="#EEEEEE"),
+        showlegend=False,
+    )
+    st.plotly_chart(fig_sang, use_container_width=True)
+else:
+    st.warning("Sem dados disponíveis para o Sangradouro no período selecionado.")
+
+st.caption(
+    f"⚠️ Estimativa baseada em 1 medição in loco (24/02/2026 11:20 — 1,00 m de profundidade) e "
+    f"leitura simultânea na Eclusa São Gonçalo ({CALIB_NIVEL_REF:.0f} cm às 11:15). "
+    f"Offset: {OFFSET:.0f} cm · Hipótese k=1 (variações de nível propagam-se uniformemente)."
+)
+
+st.markdown("---")
+
 # ── Métricas de precipitação ──────────────────────────────────────────────────
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Estações monitoradas", len(stations_df))
@@ -351,6 +421,40 @@ with col_map:
                 f"Lat: {row['VL_LATITUDE']:.4f} | Lon: {row['VL_LONGITUDE']:.4f}<br>"
                 f"Acumulado {period_days}d: <b>{mm:.1f} mm</b>",
                 max_width=220,
+            ),
+        ).add_to(m)
+
+    # ── Marcador Sangradouro Santa Isabel ────────────────────────────────────
+    if sg:
+        est_map = estimar_sangradouro(sg['nivel_cm'])
+        prof_m_map = est_map['profundidade_cm'] / 100
+        status_map = "Ativo" if est_map['ativo'] else "Seco"
+        folium.Marker(
+            location=[SANGRADOURO_LAT, SANGRADOURO_LON],
+            tooltip=folium.Tooltip(
+                f"<b>{SANGRADOURO_NOME}</b><br>"
+                f"Profundidade estimada: <b>{prof_m_map:.2f} m</b><br>"
+                f"Status: {status_map}<br>"
+                f"<i>Modelo calibrado em 24/02/2026</i>",
+                sticky=True,
+            ),
+            popup=folium.Popup(
+                f"<b>{SANGRADOURO_NOME}</b><br>"
+                f"Lat: {SANGRADOURO_LAT:.4f} | Lon: {SANGRADOURO_LON:.4f}<br>"
+                f"Profundidade estimada: <b>{prof_m_map:.2f} m</b><br>"
+                f"Status: {status_map}<br>"
+                f"<i>Ref.: Eclusa São Gonçalo ({sg['nivel_cm']:.0f} cm)<br>"
+                f"Calibração: 1 medição in loco (24/02/2026)</i>",
+                max_width=250,
+            ),
+            icon=folium.DivIcon(
+                html=(
+                    '<div style="font-size:22px;color:#8E44AD;'
+                    'text-shadow:1px 1px 0 #fff,-1px -1px 0 #fff,'
+                    '1px -1px 0 #fff,-1px 1px 0 #fff;line-height:1">★</div>'
+                ),
+                icon_size=(26, 26),
+                icon_anchor=(13, 13),
             ),
         ).add_to(m)
 
