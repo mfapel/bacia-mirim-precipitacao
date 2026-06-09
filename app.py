@@ -276,139 +276,6 @@ with ncol2:
 
 st.markdown("---")
 
-# ── Sangradouro Santa Isabel — profundidade estimada (Modelo B) ───────────────
-st.subheader("📍 Sangradouro — Santa Isabel (estimativa)")
-st.caption(
-    "Ponto não monitorado · Profundidade estimada a partir do nível da Eclusa São Gonçalo · "
-    "Modelo B: slope calibrado com mínimo histórico"
-)
-
-sc1, sc2, sc3 = st.columns(3)
-
-if sg:
-    est_b = estimar_sangradouro_b(sg['nivel_cm'], modelo_b)
-    sc1.metric(
-        "Profundidade estimada",
-        f"{est_b['profundidade_cm'] / 100:.2f} m",
-        help="Profundidade no Sangradouro de Santa Isabel (ponto não monitorado)",
-    )
-    sc2.metric(
-        "Status",
-        "🟢 Ativo" if est_b['ativo'] else "⚪ Seco",
-        help="Ativo = sangradouro com lâmina d'água",
-    )
-    sc3.metric(
-        "Nível ref. Eclusa São Gonçalo",
-        f"{sg['nivel_cm']:.0f} cm",
-        help=f"Nível usado como referência · slope k={modelo_b['k']:.2f}",
-    )
-else:
-    st.warning("Dados da Eclusa São Gonçalo indisponíveis — estimativa não calculada.")
-
-# Parâmetros do modelo (expansível)
-metodo_label = {
-    "opcao_b_2pontos": "✅ Opção B — 2 pontos",
-    "fallback_k1": "⚠️ Fallback — k=1 (dados insuficientes)",
-    "fallback_k1_sem_variacao": "⚠️ Fallback — k=1 (sem variação histórica)",
-}.get(modelo_b["metodo"], modelo_b["metodo"])
-
-with st.expander("ℹ️ Parâmetros do modelo"):
-    mc1, mc2, mc3, mc4 = st.columns(4)
-    mc1.metric("Método", metodo_label)
-    mc2.metric("Slope k", f"{modelo_b['k']:.3f}",
-               help="k=1 → variação 1:1 com o lago; k>1 → Sangradouro mais sensível")
-    mc3.metric("Nível de secagem (p05)", f"{modelo_b['nivel_seco']:.1f} cm",
-               help="Percentil 5 histórico de São Gonçalo — proxy para sangradouro seco")
-    mc4.metric("Leituras históricas", f"{modelo_b['n_leituras']:,}")
-    st.caption(
-        f"Equação: `prof (cm) = {modelo_b['k']:.3f} × nivel_SG + {modelo_b['b']:.1f}` "
-        f"· Calibração: nivel_SG={CALIB_NIVEL_REF:.0f} cm → prof={CALIB_PROF_REF:.0f} cm (24/02/2026)"
-    )
-
-# ── Gráfico: aparece apenas quando o marcador do Sangradouro é clicado ────────
-sangradouro_clicked = bool(
-    map_result
-    and map_result.get("last_object_clicked_popup")
-    and "SANGRADOURO_ID" in str(map_result["last_object_clicked_popup"])
-)
-
-if not sangradouro_clicked:
-    st.info(
-        "🟩 Clique no marcador **◆ Sangradouro — Santa Isabel** no mapa "
-        "para ver a série histórica de profundidade estimada."
-    )
-else:
-    # Série fixa: 01/02/2026 → hoje (independente do seletor de período)
-    FEB1_2026 = date(2026, 2, 1)
-    sang_days = max(30, (date.today() - FEB1_2026).days)
-
-    with st.spinner("Carregando série do Sangradouro..."):
-        df_sang = get_sangradouro_serie_b(days=sang_days)
-
-    if not df_sang.empty:
-        # Ponto de calibração in loco
-        CALIB_DT  = pd.Timestamp("2026-02-24 11:20")
-        CALIB_M   = CALIB_PROF_REF / 100   # 1.00 m
-
-        fig_sang = go.Figure()
-
-        # Modelo B — preenchido (principal)
-        fig_sang.add_trace(go.Scatter(
-            x=df_sang["DataHora"], y=df_sang["Prof_est_m_B"],
-            mode="lines", fill="tozeroy",
-            line=dict(color="#117A65", width=2),
-            fillcolor="rgba(17,122,101,0.10)",
-            name=f"Modelo B (k={modelo_b['k']:.2f})",
-            hovertemplate="%{x|%d/%m %H:%M}<br>Prof. estimada: <b>%{y:.2f} m</b><extra></extra>",
-        ))
-
-        # Modelo A (k=1) — tracejado para comparação
-        fig_sang.add_trace(go.Scatter(
-            x=df_sang["DataHora"], y=df_sang["Prof_est_m_A"],
-            mode="lines",
-            line=dict(color="#AAB7B8", width=1.2, dash="dot"),
-            name="Modelo A (k=1)",
-            hovertemplate="%{x|%d/%m %H:%M}<br>Modelo A: %{y:.2f} m<extra></extra>",
-        ))
-
-        # Ponto de calibração in loco (destacado)
-        fig_sang.add_trace(go.Scatter(
-            x=[CALIB_DT], y=[CALIB_M],
-            mode="markers",
-            marker=dict(
-                color="#E74C3C", size=12, symbol="diamond",
-                line=dict(color="white", width=1.5),
-            ),
-            name="Medição in loco (24/02/2026)",
-            hovertemplate="<b>Medição in loco</b><br>24/02/2026 11:20<br>Profundidade: 1,00 m<extra></extra>",
-        ))
-
-        fig_sang.update_layout(
-            yaxis_title="Profundidade estimada (m)",
-            xaxis_title=None,
-            height=340,
-            margin=dict(l=0, r=0, t=10, b=0),
-            plot_bgcolor="white", paper_bgcolor="white",
-            yaxis=dict(gridcolor="#EEEEEE", rangemode="tozero"),
-            xaxis=dict(
-                gridcolor="#EEEEEE",
-                range=[pd.Timestamp("2026-02-01"), pd.Timestamp(date.today())],
-            ),
-            legend=dict(x=0.01, y=0.99, bgcolor="rgba(255,255,255,0.85)"),
-        )
-        st.plotly_chart(fig_sang, use_container_width=True)
-
-        st.caption(
-            "Série desde 01/02/2026 · "
-            "◆ Ponto vermelho = medição in loco (24/02/2026, 1,00 m) · "
-            "Linha tracejada = Modelo A original (k=1) · "
-            "Hipótese: variações de nível propagam-se linearmente da lagoa ao sangradouro."
-        )
-    else:
-        st.warning("Sem dados disponíveis para o Sangradouro.")
-
-st.markdown("---")
-
 # ── Métricas de precipitação ──────────────────────────────────────────────────
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Estações monitoradas", len(stations_df))
@@ -593,6 +460,128 @@ with col_chart:
         )
         st.plotly_chart(fig, use_container_width=True)
 
+
+# ── Sangradouro Santa Isabel — profundidade estimada (Modelo B) ───────────────
+st.markdown("---")
+st.subheader("📍 Sangradouro — Santa Isabel (estimativa)")
+st.caption(
+    "Ponto não monitorado · Profundidade estimada a partir do nível da Eclusa São Gonçalo · "
+    "Modelo B: slope calibrado com mínimo histórico"
+)
+
+sc1, sc2, sc3 = st.columns(3)
+
+if sg:
+    est_b = estimar_sangradouro_b(sg['nivel_cm'], modelo_b)
+    sc1.metric(
+        "Profundidade estimada",
+        f"{est_b['profundidade_cm'] / 100:.2f} m",
+        help="Profundidade no Sangradouro de Santa Isabel (ponto não monitorado)",
+    )
+    sc2.metric(
+        "Status",
+        "🟢 Ativo" if est_b['ativo'] else "⚪ Seco",
+        help="Ativo = sangradouro com lâmina d'água",
+    )
+    sc3.metric(
+        "Nível ref. Eclusa São Gonçalo",
+        f"{sg['nivel_cm']:.0f} cm",
+        help=f"Nível usado como referência · slope k={modelo_b['k']:.2f}",
+    )
+else:
+    st.warning("Dados da Eclusa São Gonçalo indisponíveis — estimativa não calculada.")
+
+# Parâmetros do modelo (expansível)
+metodo_label = {
+    "opcao_b_2pontos": "✅ Opção B — 2 pontos",
+    "fallback_k1": "⚠️ Fallback — k=1 (dados insuficientes)",
+    "fallback_k1_sem_variacao": "⚠️ Fallback — k=1 (sem variação histórica)",
+}.get(modelo_b["metodo"], modelo_b["metodo"])
+
+with st.expander("ℹ️ Parâmetros do modelo"):
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1.metric("Método", metodo_label)
+    mc2.metric("Slope k", f"{modelo_b['k']:.3f}",
+               help="k=1 → variação 1:1 com o lago; k>1 → Sangradouro mais sensível")
+    mc3.metric("Nível de secagem (p05)", f"{modelo_b['nivel_seco']:.1f} cm",
+               help="Percentil 5 histórico de São Gonçalo — proxy para sangradouro seco")
+    mc4.metric("Leituras históricas", f"{modelo_b['n_leituras']:,}")
+    st.caption(
+        f"Equação: `prof (cm) = {modelo_b['k']:.3f} × nivel_SG + {modelo_b['b']:.1f}` "
+        f"· Calibração: nivel_SG={CALIB_NIVEL_REF:.0f} cm → prof={CALIB_PROF_REF:.0f} cm (24/02/2026)"
+    )
+
+# Gráfico: aparece apenas quando o marcador do Sangradouro é clicado
+sangradouro_clicked = bool(
+    map_result
+    and map_result.get("last_object_clicked_popup")
+    and "SANGRADOURO_ID" in str(map_result["last_object_clicked_popup"])
+)
+
+if not sangradouro_clicked:
+    st.info(
+        "🟩 Clique no marcador **◆ Sangradouro — Santa Isabel** no mapa "
+        "para ver a série histórica de profundidade estimada."
+    )
+else:
+    FEB1_2026 = date(2026, 2, 1)
+    sang_days = max(30, (date.today() - FEB1_2026).days)
+
+    with st.spinner("Carregando série do Sangradouro..."):
+        df_sang = get_sangradouro_serie_b(days=sang_days)
+
+    if not df_sang.empty:
+        CALIB_DT = pd.Timestamp("2026-02-24 11:20")
+        CALIB_M  = CALIB_PROF_REF / 100   # 1.00 m
+
+        fig_sang = go.Figure()
+
+        fig_sang.add_trace(go.Scatter(
+            x=df_sang["DataHora"], y=df_sang["Prof_est_m_B"],
+            mode="lines", fill="tozeroy",
+            line=dict(color="#117A65", width=2),
+            fillcolor="rgba(17,122,101,0.10)",
+            name=f"Modelo B (k={modelo_b['k']:.2f})",
+            hovertemplate="%{x|%d/%m %H:%M}<br>Prof. estimada: <b>%{y:.2f} m</b><extra></extra>",
+        ))
+        fig_sang.add_trace(go.Scatter(
+            x=df_sang["DataHora"], y=df_sang["Prof_est_m_A"],
+            mode="lines",
+            line=dict(color="#AAB7B8", width=1.2, dash="dot"),
+            name="Modelo A (k=1)",
+            hovertemplate="%{x|%d/%m %H:%M}<br>Modelo A: %{y:.2f} m<extra></extra>",
+        ))
+        fig_sang.add_trace(go.Scatter(
+            x=[CALIB_DT], y=[CALIB_M],
+            mode="markers",
+            marker=dict(color="#E74C3C", size=12, symbol="diamond",
+                        line=dict(color="white", width=1.5)),
+            name="Medição in loco (24/02/2026)",
+            hovertemplate="<b>Medição in loco</b><br>24/02/2026 11:20<br>Profundidade: 1,00 m<extra></extra>",
+        ))
+
+        fig_sang.update_layout(
+            yaxis_title="Profundidade estimada (m)",
+            xaxis_title=None,
+            height=340,
+            margin=dict(l=0, r=0, t=10, b=0),
+            plot_bgcolor="white", paper_bgcolor="white",
+            yaxis=dict(gridcolor="#EEEEEE", rangemode="tozero"),
+            xaxis=dict(
+                gridcolor="#EEEEEE",
+                range=[pd.Timestamp("2026-02-01"), pd.Timestamp(date.today())],
+            ),
+            legend=dict(x=0.01, y=0.99, bgcolor="rgba(255,255,255,0.85)"),
+        )
+        st.plotly_chart(fig_sang, use_container_width=True)
+        st.caption(
+            "Série desde 01/02/2026 · "
+            "◆ Ponto vermelho = medição in loco (24/02/2026, 1,00 m) · "
+            "Linha tracejada = Modelo A original (k=1) · "
+            "Hipótese: variações de nível propagam-se linearmente da lagoa ao sangradouro."
+        )
+    else:
+        st.warning("Sem dados disponíveis para o Sangradouro.")
 
 # ── Rodapé ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
