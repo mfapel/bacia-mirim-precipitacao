@@ -14,6 +14,7 @@ from datetime import datetime, date
 from inmet_api import get_stations, get_accumulated, get_daily_series
 from ana_api import (get_nivel_serie, get_nivel_atual, ESTACOES_NIVEL,
                      estimar_sangradouro, get_sangradouro_serie,
+                     estimar_sangradouro_b, get_sangradouro_serie_b, calibrar_modelo_b,
                      SANGRADOURO_NOME, SANGRADOURO_LAT, SANGRADOURO_LON,
                      CALIB_NIVEL_REF, CALIB_PROF_REF, OFFSET)
 
@@ -271,69 +272,101 @@ with ncol2:
 
 st.markdown("---")
 
-# ── Sangradouro Santa Isabel — profundidade estimada ─────────────────────────
+# ── Sangradouro Santa Isabel — profundidade estimada (Modelo B) ───────────────
 st.subheader("📍 Sangradouro — Santa Isabel (estimativa)")
 st.caption(
     "Ponto não monitorado · Profundidade estimada a partir do nível da Eclusa São Gonçalo · "
-    "Modelo calibrado com 1 medição in loco"
+    "Modelo B: slope calibrado com mínimo histórico (180 dias)"
 )
+
+# Carrega modelo B (cache 24h)
+with st.spinner("Calibrando modelo..."):
+    modelo_b = calibrar_modelo_b(dias_historico=180)
 
 sc1, sc2, sc3 = st.columns(3)
 
 if sg:
-    est = estimar_sangradouro(sg['nivel_cm'])
+    est_b = estimar_sangradouro_b(sg['nivel_cm'], modelo_b)
     sc1.metric(
         "Profundidade estimada",
-        f"{est['profundidade_cm'] / 100:.2f} m",
+        f"{est_b['profundidade_cm'] / 100:.2f} m",
         help="Profundidade no Sangradouro de Santa Isabel (ponto não monitorado)",
     )
     sc2.metric(
         "Status",
-        "🟢 Ativo" if est['ativo'] else "⚪ Seco",
+        "🟢 Ativo" if est_b['ativo'] else "⚪ Seco",
         help="Ativo = sangradouro com lâmina d'água",
     )
     sc3.metric(
         "Nível ref. Eclusa São Gonçalo",
         f"{sg['nivel_cm']:.0f} cm",
-        help=f"Nível usado como referência para estimativa (offset aplicado: {OFFSET:.0f} cm)",
+        help=f"Nível usado como referência · slope k={modelo_b['k']:.2f}",
     )
 else:
     st.warning("Dados da Eclusa São Gonçalo indisponíveis — estimativa não calculada.")
 
+# Parâmetros do modelo (expansível)
+metodo_label = {
+    "opcao_b_2pontos": "✅ Opção B — 2 pontos",
+    "fallback_k1": "⚠️ Fallback — k=1 (dados insuficientes)",
+    "fallback_k1_sem_variacao": "⚠️ Fallback — k=1 (sem variação histórica)",
+}.get(modelo_b["metodo"], modelo_b["metodo"])
+
+with st.expander("ℹ️ Parâmetros do modelo"):
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1.metric("Método", metodo_label)
+    mc2.metric("Slope k", f"{modelo_b['k']:.3f}",
+               help="k=1 → variação 1:1; k>1 → Sangradouro mais sensível que o lago")
+    mc3.metric("Nível de secagem (p05)", f"{modelo_b['nivel_seco']:.1f} cm",
+               help="Percentil 5 histórico de São Gonçalo — proxy para sangradouro seco")
+    mc4.metric("Leituras históricas", f"{modelo_b['n_leituras']:,}")
+    st.caption(
+        f"Equação: `prof (cm) = {modelo_b['k']:.3f} × nivel_SG + {modelo_b['b']:.1f}` "
+        f"· Ponto de calibração: nivel_SG={CALIB_NIVEL_REF:.0f} cm → prof={CALIB_PROF_REF:.0f} cm (24/02/2026)"
+    )
+
+# Gráfico — comparação Modelo A vs Modelo B
 with st.spinner("Carregando série do Sangradouro..."):
-    df_sang = get_sangradouro_serie(days=nivel_period)
+    df_sang = get_sangradouro_serie_b(days=nivel_period)
 
 if not df_sang.empty:
     fig_sang = go.Figure()
+    # Modelo B (principal)
     fig_sang.add_trace(go.Scatter(
-        x=df_sang["DataHora"],
-        y=df_sang["Prof_est_m"],
+        x=df_sang["DataHora"], y=df_sang["Prof_est_m_B"],
+        mode="lines", fill="tozeroy",
+        line=dict(color="#8E44AD", width=2),
+        fillcolor="rgba(142,68,173,0.10)",
+        name=f"Modelo B (k={modelo_b['k']:.2f})",
+        hovertemplate="%{x|%d/%m %H:%M}<br>Modelo B: %{y:.2f} m<extra></extra>",
+    ))
+    # Modelo A (k=1) para comparação
+    fig_sang.add_trace(go.Scatter(
+        x=df_sang["DataHora"], y=df_sang["Prof_est_m_A"],
         mode="lines",
-        fill="tozeroy",
-        line=dict(color="#8E44AD", width=1.5),
-        fillcolor="rgba(142,68,173,0.12)",
-        name="Profundidade estimada (m)",
-        hovertemplate="%{x|%d/%m %H:%M}<br>Prof. estimada: %{y:.2f} m<extra></extra>",
+        line=dict(color="#AAB7B8", width=1.2, dash="dot"),
+        name="Modelo A (k=1, offset fixo)",
+        hovertemplate="%{x|%d/%m %H:%M}<br>Modelo A: %{y:.2f} m<extra></extra>",
     ))
     fig_sang.update_layout(
         yaxis_title="Profundidade estimada (m)",
         xaxis_title=None,
-        height=280,
+        height=300,
         margin=dict(l=0, r=0, t=10, b=0),
-        plot_bgcolor="white",
-        paper_bgcolor="white",
+        plot_bgcolor="white", paper_bgcolor="white",
         yaxis=dict(gridcolor="#EEEEEE", rangemode="tozero"),
         xaxis=dict(gridcolor="#EEEEEE"),
-        showlegend=False,
+        legend=dict(x=0.01, y=0.99, bgcolor="rgba(255,255,255,0.8)"),
     )
     st.plotly_chart(fig_sang, use_container_width=True)
 else:
     st.warning("Sem dados disponíveis para o Sangradouro no período selecionado.")
 
 st.caption(
-    f"⚠️ Estimativa baseada em 1 medição in loco (24/02/2026 11:20 — 1,00 m de profundidade) e "
-    f"leitura simultânea na Eclusa São Gonçalo ({CALIB_NIVEL_REF:.0f} cm às 11:15). "
-    f"Offset: {OFFSET:.0f} cm · Hipótese k=1 (variações de nível propagam-se uniformemente)."
+    "⚠️ Modelo B: dois pontos de calibração — medição in loco (24/02/2026) + "
+    f"percentil 5 histórico (180 dias) como proxy de secagem. "
+    "Linha tracejada = Modelo A original (k=1). "
+    "Hipótese: variações de nível propagam-se linearmente da lagoa ao sangradouro."
 )
 
 st.markdown("---")
