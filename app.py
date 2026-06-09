@@ -8,9 +8,16 @@ import folium
 from streamlit_folium import st_folium
 import plotly.graph_objects as go
 import pandas as pd
+import json
 from datetime import datetime, date
 
 from inmet_api import get_stations, get_accumulated, get_daily_series
+
+# ── Carrega sub-bacias ────────────────────────────────────────────────────────
+@st.cache_data
+def load_bacias():
+    with open("bacias.geojson", "r") as f:
+        return json.load(f)
 
 # ── Configuração da página ────────────────────────────────────────────────────
 st.set_page_config(
@@ -56,8 +63,21 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("**Dados:** Estações automáticas INMET")
-    st.markdown("**Atualização:** a cada 30 min")
+    st.markdown("**Precipitação:** Open-Meteo (ERA5)")
     st.markdown(f"**Consultado em:** {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    st.markdown("---")
+
+    # Legenda das sub-bacias
+    st.markdown("**Sub-bacias da Lagoa Mirim**")
+    bacias_sidebar = load_bacias()
+    for feat in bacias_sidebar["features"]:
+        p = feat["properties"]
+        st.markdown(
+            f'<span style="display:inline-block;width:12px;height:12px;'
+            f'background:{p["cor"]};border-radius:2px;margin-right:6px;'
+            f'opacity:0.8"></span>{p["nome"]}',
+            unsafe_allow_html=True,
+        )
     st.markdown("---")
     st.markdown(
         "⚠️ Dados não validados. Uso informativo.",
@@ -178,6 +198,29 @@ with col_map:
         zoom_start=8,
         tiles="CartoDB positron",
     )
+
+    # ── Camada de sub-bacias (adicionada ANTES dos marcadores) ────────────────
+    bacias_data = load_bacias()
+    for feat in bacias_data["features"]:
+        nome = feat["properties"]["nome"]
+        cor  = feat["properties"]["cor"]
+        area = feat["properties"]["area_km2"]
+        folium.GeoJson(
+            feat,
+            name=nome,
+            style_function=lambda f, c=cor: {
+                "fillColor": c,
+                "color": c,
+                "weight": 1.2,
+                "fillOpacity": 0.20,
+                "dashArray": "4 4",
+            },
+            tooltip=folium.GeoJsonTooltip(
+                fields=["nome", "area_km2"],
+                aliases=["Sub-bacia:", "Área (km²):"],
+                localize=True,
+            ),
+        ).add_to(m)
 
     scale = SCALE_FEB24 if period == 0 else SCALE_SHORT
 
