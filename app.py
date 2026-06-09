@@ -536,14 +536,31 @@ else:
 
         fig_sang = go.Figure()
 
+        # IC 95% — banda preenchida (renderiza antes das linhas)
+        if "Prof_ci_low_m" in df_sang.columns:
+            x_band = pd.concat([df_sang["DataHora"],
+                                 df_sang["DataHora"].iloc[::-1]])
+            y_band = pd.concat([df_sang["Prof_ci_high_m"],
+                                 df_sang["Prof_ci_low_m"].iloc[::-1]])
+            fig_sang.add_trace(go.Scatter(
+                x=x_band, y=y_band,
+                fill="toself",
+                fillcolor="rgba(17,122,101,0.13)",
+                line=dict(color="rgba(255,255,255,0)"),
+                hoverinfo="skip",
+                showlegend=True,
+                name="IC 95% (incerteza do modelo)",
+            ))
+
+        # Modelo B — linha principal
         fig_sang.add_trace(go.Scatter(
             x=df_sang["DataHora"], y=df_sang["Prof_est_m_B"],
-            mode="lines", fill="tozeroy",
+            mode="lines",
             line=dict(color="#117A65", width=2),
-            fillcolor="rgba(17,122,101,0.10)",
             name=f"Modelo B (k={modelo_b['k']:.2f})",
             hovertemplate="%{x|%d/%m %H:%M}<br>Prof. estimada: <b>%{y:.2f} m</b><extra></extra>",
         ))
+        # Modelo A (k=1) — tracejado para comparação
         fig_sang.add_trace(go.Scatter(
             x=df_sang["DataHora"], y=df_sang["Prof_est_m_A"],
             mode="lines",
@@ -551,6 +568,7 @@ else:
             name="Modelo A (k=1)",
             hovertemplate="%{x|%d/%m %H:%M}<br>Modelo A: %{y:.2f} m<extra></extra>",
         ))
+        # Ponto de calibração in loco
         fig_sang.add_trace(go.Scatter(
             x=[CALIB_DT], y=[CALIB_M],
             mode="markers",
@@ -576,9 +594,10 @@ else:
         st.plotly_chart(fig_sang, use_container_width=True)
         st.caption(
             "Série desde 01/02/2026 · "
+            "Banda verde = IC 95% (bootstrap 2000 reamostras do p05 histórico) · "
             "◆ Ponto vermelho = medição in loco (24/02/2026, 1,00 m) · "
-            "Linha tracejada = Modelo A original (k=1) · "
-            "Hipótese: variações de nível propagam-se linearmente da lagoa ao sangradouro."
+            "Linha tracejada = Modelo A (k=1) · "
+            "Intervalo é zero na calibração e cresce com a distância do ponto de referência."
         )
     else:
         st.warning("Sem dados disponíveis para o Sangradouro.")

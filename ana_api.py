@@ -5,6 +5,7 @@ Dados de nível (cm) e vazão (m³/s) em tempo quase real (15 min).
 
 import requests
 import pandas as pd
+import numpy as np
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 import streamlit as st
@@ -190,17 +191,62 @@ def estimar_sangradouro_b(nivel_sg_cm: float, modelo: dict) -> dict:
     }
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def _bootstrap_sigma_k(n_boot: int = 2000) -> float:
+    """
+    Bootstrap de σ(k): incerteza do slope estimado via variabilidade do p05 histórico.
+    Usa semente fixa para reprodutibilidade. Cache 24h.
+
+    Base analítica:
+        k = CALIB_PROF_REF / (CALIB_NIVEL_REF − p05)
+        σ_prof(nivel_SG) = σ_k × |nivel_SG − CALIB_NIVEL_REF|
+    """
+    df = get_nivel_serie("88690050", days=180)
+    if df.empty:
+        return 0.0
+    hist = df[df["Nivel_cm"] > 0]["Nivel_cm"].values
+    if len(hist) < 20:
+        return 0.0
+
+    rng = np.random.default_rng(42)
+    k_samples = []
+    for _ in range(n_boot):
+        sample = rng.choice(hist, size=len(hist), replace=True)
+        p05 = float(np.percentile(sample, 5))
+        if p05 < CALIB_NIVEL_REF:
+            k_samples.append(CALIB_PROF_REF / (CALIB_NIVEL_REF - p05))
+
+    return float(np.std(k_samples)) if len(k_samples) > 10 else 0.0
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def get_sangradouro_serie_b(days: int = 30) -> pd.DataFrame:
-    """Série temporal — Modelo B (slope calibrado)."""
+    """
+    Série temporal — Modelo B com IC 95% bootstrap.
+
+    Intervalo de confiança analítico:
+        σ_prof = σ_k × |nivel_SG − CALIB_NIVEL_REF|
+        IC 95% = prof_B ± 1.96 × σ_prof
+    O intervalo é zero no ponto de calibração e cresce com a distância dele.
+    """
     df = get_nivel_serie("88690050", days=days)
     if df.empty:
         return pd.DataFrame()
     modelo = calibrar_modelo_b()
     df = df[df["Nivel_cm"] > 0].copy()
+
     df["Prof_est_cm_A"] = (df["Nivel_cm"] + OFFSET).clip(lower=0)
     df["Prof_est_cm_B"] = (modelo["k"] * df["Nivel_cm"] + modelo["b"]).clip(lower=0)
     df["Prof_est_m_A"]  = df["Prof_est_cm_A"] / 100
     df["Prof_est_m_B"]  = df["Prof_est_cm_B"] / 100
-    return df[["DataHora", "Nivel_cm", "Prof_est_cm_A", "Prof_est_cm_B",
-               "Prof_est_m_A", "Prof_est_m_B"]]
+
+    # IC 95% — propagação analítica da incerteza de k
+    sigma_k  = _bootstrap_sigma_k()
+    half_ci  = 1.96 * sigma_k * (df["Nivel_cm"] - CALIB_NIVEL_REF).abs() / 100
+    df["Prof_ci_low_m"]  = (df["Prof_est_m_B"] - half_ci).clip(lower=0)
+    df["Prof_ci_high_m"] = df["Prof_est_m_B"] + half_ci
+
+    return df[["DataHora", "Nivel_cm",
+               "Prof_est_cm_A", "Prof_est_cm_B",
+               "Prof_est_m_A",  "Prof_est_m_B",
+               "Prof_ci_low_m", "Prof_ci_high_m"]]
