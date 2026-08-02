@@ -91,22 +91,29 @@ def get_nivel_atual(cod: str) -> dict:
 
 
 # ── Modelo de estimativa — Sangradouro Santa Isabel ───────────────────────────
-# Ponto de calibração in loco: 24/02/2026 11:20
-#   Profundidade medida       = 100 cm (1 m)
-#   Nível Eclusa São Gonçalo  =  13 cm (leitura 11:15)
+# Medições de campo (dois pontos reais):
+#   1ª  24/02/2026 11:20 → nivel_SG=13 cm,  prof=100 cm (1,00 m)
+#   2ª  30/07/2026 12:30 → nivel_SG=131 cm, prof=180 cm (1,80 m)
 #
 # Modelo A (k=1, offset fixo):  prof = nivel_SG + 87
-# Modelo B (2 pontos):          prof = k × nivel_SG + b
-#   Segundo ponto: percentil 5 histórico de São Gonçalo → prof ≈ 0 (seco)
+# Modelo B (2 medições campo):   prof = k × nivel_SG + b
+#   k = (180−100)/(131−13) = 80/118 ≈ 0.678
+#   b = 100 − 0.678×13 ≈ 91.2 cm
 
 SANGRADOURO_LAT    = -32.121142
 SANGRADOURO_LON    = -52.599856
 SANGRADOURO_NOME   = "Sangradouro — Santa Isabel"
-CALIB_NIVEL_REF       = 13.0    # cm (Eclusa São Gonçalo em 24/02/2026 11:15)
-CALIB_PROF_REF        = 100.0   # cm (medição in loco em 24/02/2026 11:20)
-OFFSET                = CALIB_PROF_REF - CALIB_NIVEL_REF   # = 87 cm (Modelo A)
-CALIB_DEPTH_MIN_CM    = 0.0     # cm — assumido: Sangradouro seco no mínimo histórico
-CALIB_INCERTEZA_CM    = 15.0    # cm — incerteza estimada da medição in loco (±15 cm)
+
+# 1ª medição de campo — 24/02/2026 11:20
+CALIB_NIVEL_REF    = 13.0    # cm (Eclusa São Gonçalo 11:15)
+CALIB_PROF_REF     = 100.0   # cm
+
+# 2ª medição de campo — 30/07/2026 12:30
+CALIB2_NIVEL_REF   = 131.0   # cm (Eclusa São Gonçalo 12:30)
+CALIB2_PROF_REF    = 180.0   # cm
+
+OFFSET             = CALIB_PROF_REF - CALIB_NIVEL_REF   # = 87 cm (Modelo A)
+CALIB_INCERTEZA_CM = 15.0    # cm — incerteza estimada por medição de campo (±15 cm)
 
 
 # ── Modelo A (k=1, mantido para comparação / fallback) ────────────────────────
@@ -134,43 +141,33 @@ def get_sangradouro_serie(days: int = 30) -> pd.DataFrame:
     return df[["DataHora", "Nivel_cm", "Prof_est_cm", "Prof_est_m"]]
 
 
-# ── Modelo B (2 pontos: calibração + mínimo histórico) ───────────────────────
+# ── Modelo B (2 medições de campo reais) ─────────────────────────────────────
+
+# Slope e intercepto calculados diretamente dos dois pontos reais:
+_K_CAMPO = (CALIB2_PROF_REF - CALIB_PROF_REF) / (CALIB2_NIVEL_REF - CALIB_NIVEL_REF)
+_B_CAMPO = CALIB_PROF_REF - _K_CAMPO * CALIB_NIVEL_REF
+
 
 @st.cache_data(ttl=86400, show_spinner=False)   # recalcula 1×/dia
 def calibrar_modelo_b(dias_historico: int = 180) -> dict:
     """
-    Estima slope k usando p05 histórico como threshold de secagem.
+    Modelo B calibrado com 2 medições de campo reais.
+    nivel_seco (p05 histórico) usado apenas como threshold de ativação.
     Retorna dict com: k, b, nivel_seco, n_leituras, metodo
     """
     df = get_nivel_serie("88690050", days=dias_historico)
     if not df.empty:
         df = df[df["Nivel_cm"] > 0]
 
-    if df.empty or len(df) < 20:
-        return {
-            "k": 1.0, "b": float(OFFSET),
-            "nivel_seco": float(-OFFSET),
-            "n_leituras": 0, "metodo": "fallback_k1",
-        }
-
-    nivel_seco = float(df["Nivel_cm"].quantile(0.05))
-
-    if nivel_seco >= CALIB_NIVEL_REF:
-        return {
-            "k": 1.0, "b": float(OFFSET),
-            "nivel_seco": round(nivel_seco, 1),
-            "n_leituras": int(len(df)), "metodo": "fallback_k1_sem_variacao",
-        }
-
-    k = (CALIB_PROF_REF - CALIB_DEPTH_MIN_CM) / (CALIB_NIVEL_REF - nivel_seco)
-    b = CALIB_PROF_REF - k * CALIB_NIVEL_REF
+    n = int(len(df)) if not df.empty else 0
+    nivel_seco = float(df["Nivel_cm"].quantile(0.05)) if n >= 20 else round(_B_CAMPO / -_K_CAMPO, 1)
 
     return {
-        "k": round(k, 3),
-        "b": round(b, 1),
+        "k": round(_K_CAMPO, 3),
+        "b": round(_B_CAMPO, 1),
         "nivel_seco": round(nivel_seco, 1),
-        "n_leituras": int(len(df)),
-        "metodo": "opcao_b_2pontos",
+        "n_leituras": n,
+        "metodo": "opcao_b_2medicoes_campo",
     }
 
 

@@ -16,7 +16,9 @@ from ana_api import (get_nivel_serie, get_nivel_atual, ESTACOES_NIVEL,
                      estimar_sangradouro, get_sangradouro_serie,
                      estimar_sangradouro_b, get_sangradouro_serie_b, calibrar_modelo_b,
                      SANGRADOURO_NOME, SANGRADOURO_LAT, SANGRADOURO_LON,
-                     CALIB_NIVEL_REF, CALIB_PROF_REF, OFFSET, CALIB_INCERTEZA_CM)
+                     CALIB_NIVEL_REF, CALIB_PROF_REF,
+                     CALIB2_NIVEL_REF, CALIB2_PROF_REF,
+                     OFFSET, CALIB_INCERTEZA_CM)
 
 # ── Carrega sub-bacias ────────────────────────────────────────────────────────
 @st.cache_data
@@ -466,7 +468,7 @@ st.markdown("---")
 st.subheader("📍 Sangradouro — Santa Isabel (estimativa)")
 st.caption(
     "Ponto não monitorado · Profundidade estimada a partir do nível da Eclusa São Gonçalo · "
-    "Modelo B: slope calibrado com mínimo histórico"
+    "Modelo B: reta calibrada com 2 medições de campo (24/02/2026 e 30/07/2026)"
 )
 
 sc1, sc2, sc3 = st.columns(3)
@@ -500,6 +502,7 @@ else:
 
 # Parâmetros do modelo (expansível)
 metodo_label = {
+    "opcao_b_2medicoes_campo": "✅ 2 medições de campo",
     "opcao_b_2pontos": "✅ Opção B — 2 pontos",
     "fallback_k1": "⚠️ Fallback — k=1 (dados insuficientes)",
     "fallback_k1_sem_variacao": "⚠️ Fallback — k=1 (sem variação histórica)",
@@ -515,7 +518,8 @@ with st.expander("ℹ️ Parâmetros do modelo"):
     mc4.metric("Leituras históricas", f"{modelo_b['n_leituras']:,}")
     st.caption(
         f"Equação: `prof (cm) = {modelo_b['k']:.3f} × nivel_SG + {modelo_b['b']:.1f}` "
-        f"· Calibração: nivel_SG={CALIB_NIVEL_REF:.0f} cm → prof={CALIB_PROF_REF:.0f} cm (24/02/2026)"
+        f"· Pt. 1: nivel_SG={CALIB_NIVEL_REF:.0f} cm → {CALIB_PROF_REF:.0f} cm (24/02/2026) "
+        f"· Pt. 2: nivel_SG={CALIB2_NIVEL_REF:.0f} cm → {CALIB2_PROF_REF:.0f} cm (30/07/2026)"
     )
 
 # Gráfico: aparece apenas quando o marcador do Sangradouro é clicado
@@ -538,8 +542,10 @@ else:
         df_sang = get_sangradouro_serie_b(days=sang_days)
 
     if not df_sang.empty:
-        CALIB_DT = pd.Timestamp("2026-02-24 11:20")
-        CALIB_M  = CALIB_PROF_REF / 100   # 1.00 m
+        CALIB_DT  = pd.Timestamp("2026-02-24 11:20")
+        CALIB_M   = CALIB_PROF_REF / 100    # 1.00 m
+        CALIB2_DT = pd.Timestamp("2026-07-30 12:30")
+        CALIB2_M  = CALIB2_PROF_REF / 100   # 1.80 m
 
         fig_sang = go.Figure()
 
@@ -586,14 +592,29 @@ else:
             name="Modelo A (k=1)",
             hovertemplate="%{x|%d/%m %H:%M}<br>Modelo A: %{y:.2f} m<extra></extra>",
         ))
-        # Ponto de calibração in loco
+        # Ponto de calibração 1 — 24/02/2026
         fig_sang.add_trace(go.Scatter(
             x=[CALIB_DT], y=[CALIB_M],
-            mode="markers",
-            marker=dict(color="#E74C3C", size=12, symbol="diamond",
-                        line=dict(color="white", width=1.5)),
+            mode="markers+text",
+            marker=dict(color="#E74C3C", size=14, symbol="diamond",
+                        line=dict(color="white", width=2)),
+            text=["1,00 m"],
+            textposition="top center",
+            textfont=dict(color="#E74C3C", size=11),
             name="Medição in loco (24/02/2026)",
             hovertemplate="<b>Medição in loco</b><br>24/02/2026 11:20<br>Profundidade: 1,00 m<extra></extra>",
+        ))
+        # Ponto de calibração 2 — 30/07/2026
+        fig_sang.add_trace(go.Scatter(
+            x=[CALIB2_DT], y=[CALIB2_M],
+            mode="markers+text",
+            marker=dict(color="#E74C3C", size=14, symbol="diamond",
+                        line=dict(color="white", width=2)),
+            text=["1,80 m"],
+            textposition="top center",
+            textfont=dict(color="#E74C3C", size=11),
+            name="Medição in loco (30/07/2026)",
+            hovertemplate="<b>Medição in loco</b><br>30/07/2026 12:30<br>Profundidade: 1,80 m<extra></extra>",
         ))
 
         fig_sang.update_layout(
@@ -612,9 +633,8 @@ else:
         st.plotly_chart(fig_sang, use_container_width=True)
         st.caption(
             f"Série desde 01/02/2026 · "
-            f"Banda verde = faixa ±{CALIB_INCERTEZA_CM:.0f} cm "
-            f"(propagação da incerteza da medição in loco de 24/02/2026) · "
-            f"◆ Ponto vermelho = medição de campo (1,00 m) · "
+            f"Banda verde = faixa ±{CALIB_INCERTEZA_CM:.0f} cm (incerteza das medições de campo) · "
+            f"◆ Pontos vermelhos = medições de campo (1,00 m em 24/02 e 1,80 m em 30/07) · "
             f"Linha tracejada = Modelo A (k=1, referência)."
         )
     else:
