@@ -68,16 +68,13 @@ def get_gfs_ensemble(lat: float = BASIN_LAT, lon: float = BASIN_LON) -> pd.DataF
     Horizonte: até 35 dias; 31 membros.
     Skill marginal após semana 2 — apresentar apenas como faixa probabilística.
     """
-    # GFS ensemble: 31 membros indexados de 01 a 31
-    member_vars = [f"precipitation_sum_member{i:02d}" for i in range(1, 32)]
-
     try:
         r = requests.get(
             OPENMETEO_ENSEMBLE,
             params={
                 "latitude":  lat,
                 "longitude": lon,
-                "daily":     ",".join(member_vars),
+                "daily":     "precipitation_sum",
                 "models":    "gfs025",
                 "timezone":  "America/Sao_Paulo",
                 "forecast_days": 35,
@@ -87,7 +84,9 @@ def get_gfs_ensemble(lat: float = BASIN_LAT, lon: float = BASIN_LON) -> pd.DataF
         if r.status_code != 200:
             return pd.DataFrame()
 
-        d = r.json()["daily"]
+        d = r.json().get("daily", {})
+        if not d:
+            return pd.DataFrame()
         dates = pd.to_datetime(d["time"])
 
         arrays = []
