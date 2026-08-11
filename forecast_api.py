@@ -42,7 +42,7 @@ def get_ecmwf_15d(lat: float = BASIN_LAT, lon: float = BASIN_LON) -> pd.DataFram
                 "latitude": lat,
                 "longitude": lon,
                 "daily": "precipitation_sum",
-                "models": "ecmwf_ifs025",
+                "models": "ecmwf_ifs04",   # 0.4° gratuito; 0.25° requer API key
                 "timezone": "America/Sao_Paulo",
                 "forecast_days": 15,
             },
@@ -68,8 +68,8 @@ def get_gfs_ensemble(lat: float = BASIN_LAT, lon: float = BASIN_LON) -> pd.DataF
     Horizonte: até 35 dias; 31 membros.
     Skill marginal após semana 2 — apresentar apenas como faixa probabilística.
     """
-    # 31 membros GFS (member01–member30 + member00 = controle)
-    member_vars = [f"precipitation_sum_member{i:02d}" for i in range(31)]
+    # GFS ensemble: 31 membros indexados de 01 a 31
+    member_vars = [f"precipitation_sum_member{i:02d}" for i in range(1, 32)]
 
     try:
         r = requests.get(
