@@ -102,6 +102,11 @@ def get_gfs_ensemble(lat: float = BASIN_LAT, lon: float = BASIN_LON) -> pd.DataF
 
         mat = np.array(arrays)  # (n_members, n_days)
 
+        # Remove dias onde todos os membros são NaN (além do horizonte real do modelo)
+        valid_days = ~np.all(np.isnan(mat), axis=0)
+        mat = mat[:, valid_days]
+        dates = dates[valid_days]
+
         df = pd.DataFrame({
             "Data":    dates,
             "P10_mm":  np.nanpercentile(mat, 10, axis=0).clip(min=0),

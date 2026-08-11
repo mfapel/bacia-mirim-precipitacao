@@ -650,7 +650,7 @@ st.caption(
     "Skill positivo confirmado até ~14 dias para o sul do Brasil (Badagian et al., 2024)"
 )
 
-tab_15d, tab_35d = st.tabs(["📅 15 dias — ECMWF IFS (determinístico)", "📆 35 dias — GFS Ensemble (probabilístico)"])
+tab_15d, tab_35d = st.tabs(["📅 15 dias — ECMWF IFS (determinístico)", "📆 GFS Ensemble (probabilístico)"])
 
 with tab_15d:
     with st.spinner("Carregando previsão ECMWF IFS..."):
