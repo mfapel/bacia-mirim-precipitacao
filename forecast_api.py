@@ -57,7 +57,9 @@ def get_ecmwf_15d(lat: float = BASIN_LAT, lon: float = BASIN_LON, _v: int = 2) -
         })
         df["Acumulado_mm"] = df["Precip_mm"].cumsum()
         return df
-    except Exception:
+    except Exception as e:
+        import traceback
+        st.session_state["_ecmwf_error"] = traceback.format_exc()
         return pd.DataFrame()
 
 

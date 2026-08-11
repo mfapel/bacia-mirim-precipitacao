@@ -658,6 +658,8 @@ with tab_15d:
 
     if df_15d.empty:
         st.warning("Previsão ECMWF IFS indisponível no momento.")
+        if "_ecmwf_error" in st.session_state:
+            st.code(st.session_state["_ecmwf_error"])
     else:
         total_15d = df_15d["Precip_mm"].sum()
         fc1, fc2, fc3 = st.columns(3)
