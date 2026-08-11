@@ -53,7 +53,7 @@ def get_ecmwf_15d(lat: float = BASIN_LAT, lon: float = BASIN_LON, _v: int = 2) -
         d = r.json()["daily"]
         df = pd.DataFrame({
             "Data":       pd.to_datetime(d["time"]),
-            "Precip_mm":  pd.to_numeric(d["precipitation_sum"], errors="coerce").fillna(0),
+            "Precip_mm":  pd.to_numeric(pd.Series(d["precipitation_sum"]), errors="coerce").fillna(0),
         })
         df["Acumulado_mm"] = df["Precip_mm"].cumsum()
         return df
