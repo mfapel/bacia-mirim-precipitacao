@@ -643,7 +643,7 @@ else:
 
 # ── Previsão de Precipitação ──────────────────────────────────────────────────
 st.markdown("---")
-st.subheader("🔮 Previsão de Precipitação — Centro da Bacia Mirim")
+st.subheader("Previsão de Precipitação — Centro da Bacia Mirim")
 st.caption(
     f"Ponto de referência: {BASIN_LAT:.2f}°S, {abs(BASIN_LON):.2f}°W · "
     "ECMWF IFS 0.4° (15 dias) e GFS Ensemble 0.5° (35 dias) · "
