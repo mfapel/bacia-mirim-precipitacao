@@ -30,7 +30,7 @@ BASIN_LON = -52.80
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_ecmwf_15d(lat: float = BASIN_LAT, lon: float = BASIN_LON) -> pd.DataFrame:
+def get_ecmwf_15d(lat: float = BASIN_LAT, lon: float = BASIN_LON, _v: int = 2) -> pd.DataFrame:
     """
     Previsão ECMWF IFS 0.25° — precipitação diária nos próximos 15 dias.
     Skill positivo confirmado até ~14 dias (Badagian et al., 2024).
