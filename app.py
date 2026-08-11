@@ -13,6 +13,7 @@ from datetime import datetime, date
 
 from inmet_api import get_stations, get_accumulated, get_daily_series
 from forecast_api import get_ecmwf_15d, get_gfs_ensemble, BASIN_LAT, BASIN_LON
+from forecast_map_api import get_forecast_grid, GRID_LATS, GRID_LONS
 from ana_api import (get_nivel_serie, get_nivel_atual, ESTACOES_NIVEL,
                      estimar_sangradouro, get_sangradouro_serie,
                      estimar_sangradouro_b, get_sangradouro_serie_b, calibrar_modelo_b,
@@ -766,6 +767,68 @@ with tab_35d:
             "Linha vermelha tracejada = limite do skill útil (~14 dias) · "
             "Fonte: Badagian et al. (2024), *Int. J. Climatology*."
         )
+
+# ── Campos Espaciais de Previsão ──────────────────────────────────────────────
+st.markdown("---")
+st.subheader("Campos Espaciais de Previsão — Região da Lagoa Mirim")
+st.caption(
+    "Grade 10×13 pontos · resolução 0.5° · Open-Meteo best_match · horizonte 15 dias"
+)
+
+with st.spinner("Carregando grade de previsão..."):
+    grid_data = get_forecast_grid()
+
+if not grid_data:
+    st.warning("Campos espaciais indisponíveis no momento.")
+else:
+    dates = grid_data["dates"]
+    n_days = len(dates)
+
+    day_labels = [d.strftime("%d/%m") for d in dates]
+    day_idx = st.select_slider(
+        "Selecione o dia da previsão",
+        options=list(range(n_days)),
+        format_func=lambda i: day_labels[i],
+        key="map_day_slider",
+    )
+
+    tab_precip, tab_wind, tab_gusts = st.tabs(
+        ["Precipitação (mm)", "Vento 10m (km/h)", "Rajada (km/h)"]
+    )
+
+    def _make_contour(z_data, title, colorscale, unit, day_i):
+        z = z_data[:, :, day_i]
+        fig = go.Figure(go.Contour(
+            z=z,
+            x=GRID_LONS.tolist(),
+            y=GRID_LATS.tolist(),
+            colorscale=colorscale,
+            contours=dict(showlabels=True, labelfont=dict(size=10, color="white")),
+            colorbar=dict(title=unit, thickness=14),
+            hovertemplate="Lon: %{x:.1f}°<br>Lat: %{y:.1f}°<br>" + title + ": %{z:.1f} " + unit + "<extra></extra>",
+        ))
+        fig.update_layout(
+            height=420,
+            margin=dict(l=0, r=0, t=30, b=0),
+            xaxis_title="Longitude (°W)",
+            yaxis_title="Latitude (°S)",
+            title=dict(text=f"{title} — {day_labels[day_i]}", font=dict(size=13)),
+            xaxis=dict(tickformat=".1f"),
+            yaxis=dict(tickformat=".1f", scaleanchor="x", scaleratio=1),
+        )
+        return fig
+
+    with tab_precip:
+        fig_p = _make_contour(grid_data["precip"], "Precipitação", "Blues", "mm", day_idx)
+        st.plotly_chart(fig_p, use_container_width=True)
+
+    with tab_wind:
+        fig_w = _make_contour(grid_data["wind"], "Vento 10m", "YlOrRd", "km/h", day_idx)
+        st.plotly_chart(fig_w, use_container_width=True)
+
+    with tab_gusts:
+        fig_g = _make_contour(grid_data["gusts"], "Rajada", "OrRd", "km/h", day_idx)
+        st.plotly_chart(fig_g, use_container_width=True)
 
 # ── Rodapé ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
