@@ -12,6 +12,7 @@ import json
 from datetime import datetime, date
 
 from inmet_api import get_stations, get_accumulated, get_daily_series
+from forecast_api import get_ecmwf_15d, get_gfs_ensemble, BASIN_LAT, BASIN_LON
 from ana_api import (get_nivel_serie, get_nivel_atual, ESTACOES_NIVEL,
                      estimar_sangradouro, get_sangradouro_serie,
                      estimar_sangradouro_b, get_sangradouro_serie_b, calibrar_modelo_b,
@@ -294,6 +295,135 @@ col4.metric(
     "Estações com chuva",
     int((stations_df["ACUMULADO_MM"] > 0).sum()),
 )
+
+st.markdown("---")
+
+# ── Previsão de Precipitação ──────────────────────────────────────────────────
+st.subheader("🔮 Previsão de Precipitação — Centro da Bacia Mirim")
+st.caption(
+    f"Ponto de referência: {BASIN_LAT:.2f}°S, {abs(BASIN_LON):.2f}°W · "
+    "ECMWF IFS 0.25° (15 dias) e GFS Ensemble 0.5° (35 dias) · "
+    "Skill positivo confirmado até ~14 dias para o sul do Brasil (Badagian et al., 2024)"
+)
+
+tab_15d, tab_46d = st.tabs(["📅 15 dias — ECMWF IFS (determinístico)", "📆 35 dias — GFS Ensemble (probabilístico)"])
+
+with tab_15d:
+    with st.spinner("Carregando previsão ECMWF IFS..."):
+        df_15d = get_ecmwf_15d()
+
+    if df_15d.empty:
+        st.warning("Previsão ECMWF IFS indisponível no momento.")
+    else:
+        total_15d = df_15d["Precip_mm"].sum()
+        fc1, fc2, fc3 = st.columns(3)
+        fc1.metric("Acumulado previsto (15 dias)", f"{total_15d:.1f} mm")
+        fc2.metric("Máximo diário previsto", f"{df_15d['Precip_mm'].max():.1f} mm",
+                   df_15d.loc[df_15d['Precip_mm'].idxmax(), 'Data'].strftime('%d/%m'))
+        fc3.metric("Dias com chuva previstos", int((df_15d['Precip_mm'] > 0.5).sum()))
+
+        fig_15d = go.Figure()
+        fig_15d.add_trace(go.Bar(
+            x=df_15d["Data"], y=df_15d["Precip_mm"],
+            marker_color="#4A90D9",
+            marker_line_color="#1A5276",
+            marker_line_width=0.5,
+            name="Precipitação diária (mm)",
+            hovertemplate="%{x|%d/%m/%Y}<br>%{y:.1f} mm<extra></extra>",
+        ))
+        fig_15d.add_trace(go.Scatter(
+            x=df_15d["Data"], y=df_15d["Acumulado_mm"],
+            mode="lines", yaxis="y2",
+            line=dict(color="#E67E22", width=2),
+            name="Acumulado (mm)",
+            hovertemplate="%{x|%d/%m/%Y}<br>Acumulado: %{y:.1f} mm<extra></extra>",
+        ))
+        fig_15d.update_layout(
+            xaxis_title=None, height=320,
+            margin=dict(l=0, r=0, t=10, b=0),
+            plot_bgcolor="white", paper_bgcolor="white",
+            yaxis=dict(title="mm/dia", gridcolor="#EEEEEE", zeroline=True),
+            yaxis2=dict(title="Acumulado (mm)", overlaying="y", side="right",
+                        color="#E67E22", showgrid=False),
+            legend=dict(x=0.01, y=0.99, bgcolor="rgba(255,255,255,0.85)"),
+            xaxis=dict(gridcolor="#EEEEEE"),
+        )
+        st.plotly_chart(fig_15d, use_container_width=True)
+        st.caption(
+            "⚠️ Skill da previsão diminui progressivamente após o dia 7. "
+            "Valores além de 10 dias devem ser interpretados com cautela."
+        )
+
+with tab_46d:
+    with st.spinner("Carregando ensemble GFS..."):
+        df_35d = get_gfs_ensemble()
+
+    if df_35d.empty:
+        st.warning("Previsão ensemble GFS indisponível no momento.")
+    else:
+        ec1, ec2, ec3 = st.columns(3)
+        ec1.metric("Mediana acumulada (35 dias)", f"{df_35d['P50_acum'].iloc[-1]:.0f} mm")
+        ec2.metric("Cenário chuvoso (P90)",        f"{df_35d['P90_acum'].iloc[-1]:.0f} mm")
+        ec3.metric("Cenário seco (P10)",            f"{df_35d['P10_acum'].iloc[-1]:.0f} mm")
+
+        fig_35d = go.Figure()
+
+        # Banda P10–P90 (acumulado)
+        x_band = pd.concat([df_35d["Data"], df_35d["Data"].iloc[::-1]])
+        y_band = pd.concat([df_35d["P90_acum"], df_35d["P10_acum"].iloc[::-1]])
+        fig_35d.add_trace(go.Scatter(
+            x=x_band, y=y_band,
+            fill="toself",
+            fillcolor="rgba(74,144,217,0.18)",
+            line=dict(color="rgba(74,144,217,0.35)"),
+            hoverinfo="skip", showlegend=True,
+            name="Faixa P10–P90 (31 membros GFS)",
+        ))
+        # Mediana acumulada
+        fig_35d.add_trace(go.Scatter(
+            x=df_35d["Data"], y=df_35d["P50_acum"],
+            mode="lines",
+            line=dict(color="#1A5276", width=2),
+            name="Mediana acumulada (P50)",
+            hovertemplate="%{x|%d/%m/%Y}<br>Mediana acumulada: %{y:.1f} mm<extra></extra>",
+        ))
+        # Barras diárias (mediana)
+        fig_35d.add_trace(go.Bar(
+            x=df_35d["Data"], y=df_35d["P50_mm"],
+            marker_color="rgba(74,144,217,0.5)",
+            name="Precipitação diária mediana",
+            yaxis="y2",
+            hovertemplate="%{x|%d/%m/%Y}<br>Mediana: %{y:.1f} mm<extra></extra>",
+        ))
+        # Linha divisória semana 2 → incerteza aumenta
+        semana2 = pd.Timestamp(date.today()) + pd.Timedelta(days=14)
+        fig_35d.add_vline(
+            x=semana2, line_dash="dot",
+            line_color="#E74C3C", line_width=1.5,
+            annotation_text="Semana 2 →<br>incerteza aumenta",
+            annotation_position="top right",
+            annotation_font_size=10,
+            annotation_font_color="#E74C3C",
+        )
+        fig_35d.update_layout(
+            xaxis_title=None, height=360,
+            margin=dict(l=0, r=0, t=20, b=0),
+            plot_bgcolor="white", paper_bgcolor="white",
+            yaxis=dict(title="Acumulado (mm)", gridcolor="#EEEEEE"),
+            yaxis2=dict(title="mm/dia", overlaying="y", side="right",
+                        showgrid=False, color="#4A90D9"),
+            legend=dict(x=0.01, y=0.99, bgcolor="rgba(255,255,255,0.85)"),
+            xaxis=dict(gridcolor="#EEEEEE"),
+            barmode="overlay",
+        )
+        st.plotly_chart(fig_35d, use_container_width=True)
+        st.caption(
+            "Banda azul = faixa de incerteza entre os 31 membros do GFS Ensemble 0.5° · "
+            "Linha azul escura = mediana acumulada · "
+            "Barras = precipitação diária mediana · "
+            "Linha vermelha tracejada = limite do skill útil (~14 dias) · "
+            "Fonte: Badagian et al. (2024), *Int. J. Climatology*."
+        )
 
 st.markdown("---")
 
