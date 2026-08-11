@@ -42,7 +42,7 @@ def get_ecmwf_15d(lat: float = BASIN_LAT, lon: float = BASIN_LON, _v: int = 2) -
                 "latitude": lat,
                 "longitude": lon,
                 "daily": "precipitation_sum",
-                "models": "ecmwf_ifs04",   # 0.4° gratuito; 0.25° requer API key
+                "models": "best_match",   # selecao automatica por coordenada
                 "timezone": "America/Sao_Paulo",
                 "forecast_days": 15,
             },
