@@ -231,9 +231,15 @@ def geo_contour_traces(z_2d: np.ndarray, colorscale: str, unit: str,
     norm = np.clip((mids - _vmin) / (_vmax - _vmin), 0, 1).tolist()
     hex_colors = pc.sample_colorscale(colorscale, norm)
 
-    def _hex_to_rgba(h, a):
-        h = h.lstrip("#")
-        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    def _to_rgba(color, a):
+        import re
+        # Aceita "rgb(r,g,b)" ou "#rrggbb"
+        m = re.match(r"rgb\((\d+),\s*(\d+),\s*(\d+)\)", color)
+        if m:
+            r, g, b = m.group(1), m.group(2), m.group(3)
+        else:
+            h = color.lstrip("#")
+            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
         return f"rgba({r},{g},{b},{a})"
 
     # Passo da grade (0.5°)
@@ -243,7 +249,7 @@ def geo_contour_traces(z_2d: np.ndarray, colorscale: str, unit: str,
     traces = []
     for i in range(len(levels) - 1):
         lo, hi = levels[i], levels[i + 1]
-        fill_color = _hex_to_rgba(hex_colors[i], alpha)
+        fill_color = _to_rgba(hex_colors[i], alpha)
 
         rect_lats, rect_lons = [], []
         for ii, lat in enumerate(GRID_LATS):
