@@ -213,7 +213,6 @@ def geo_shaded_traces(z_2d: np.ndarray, colorscale: str, unit: str,
     Cada polígono de cada banda de nível vira um go.Scattergeo separado
     com fill='toself' — evita o problema de preenchimento da área total.
     """
-    import re
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -241,15 +240,6 @@ def geo_shaded_traces(z_2d: np.ndarray, colorscale: str, unit: str,
     norm = np.clip((mids - _vmin) / (_vmax - _vmin), 0, 1).tolist()
     hex_colors = pc.sample_colorscale(colorscale, norm)
 
-    def _to_rgba(c, a):
-        m = re.match(r"rgb\((\d+),\s*(\d+),\s*(\d+)\)", c)
-        if m:
-            r, g, b = m.groups()
-        else:
-            h = c.lstrip("#")
-            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-        return f"rgba({r},{g},{b},{a})"
-
     traces = []
     try:
         all_segs = csf.allsegs  # disponível até matplotlib 3.9 (removido no 3.10)
@@ -257,17 +247,18 @@ def geo_shaded_traces(z_2d: np.ndarray, colorscale: str, unit: str,
         all_segs = []
 
     for i, segs in enumerate(all_segs):
-        fc = _to_rgba(hex_colors[i], alpha)
         for seg in segs:
             if len(seg) < 3:
                 continue
-            # Um trace por polígono — fill='toself' funciona corretamente
+            # opacity no trace (não rgba no fillcolor) — única forma confiável
+            # de transparência em go.Scattergeo
             traces.append(_go.Scattergeo(
                 lat=seg[:, 1].tolist(),
                 lon=seg[:, 0].tolist(),
                 mode="lines",
                 fill="toself",
-                fillcolor=fc,
+                fillcolor=hex_colors[i],
+                opacity=alpha,
                 line=dict(color="rgba(0,0,0,0)", width=0),
                 showlegend=False,
                 hoverinfo="skip",
