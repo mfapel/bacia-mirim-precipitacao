@@ -205,6 +205,90 @@ def build_wind_vectors(u_2d: np.ndarray, v_2d: np.ndarray,
     return arrow_lats, arrow_lons
 
 
+def geo_shaded_traces(z_2d: np.ndarray, colorscale: str, unit: str,
+                      n_levels: int = 8, vmin: float = None, vmax: float = None,
+                      alpha: float = 0.5):
+    """
+    Preenchimento sombreado transparente via contourf.
+    Cada polígono de cada banda de nível vira um go.Scattergeo separado
+    com fill='toself' — evita o problema de preenchimento da área total.
+    """
+    import re
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import plotly.graph_objects as _go
+    import plotly.colors as pc
+
+    z = z_2d.copy()
+    z_valid = z[~np.isnan(z)]
+    if z_valid.size == 0:
+        return []
+
+    _vmin = float(vmin if vmin is not None else z_valid.min())
+    _vmax = float(vmax if vmax is not None else z_valid.max())
+    if _vmax <= _vmin:
+        _vmax = _vmin + 1.0
+
+    z = np.where(np.isnan(z), np.nanmean(z), z)
+    levels = np.linspace(_vmin, _vmax, n_levels + 1)
+
+    fig_mpl, ax = plt.subplots()
+    csf = ax.contourf(GRID_LONS, GRID_LATS, z, levels=levels)
+    plt.close(fig_mpl)
+
+    mids = (levels[:-1] + levels[1:]) / 2
+    norm = np.clip((mids - _vmin) / (_vmax - _vmin), 0, 1).tolist()
+    hex_colors = pc.sample_colorscale(colorscale, norm)
+
+    def _to_rgba(c, a):
+        m = re.match(r"rgb\((\d+),\s*(\d+),\s*(\d+)\)", c)
+        if m:
+            r, g, b = m.groups()
+        else:
+            h = c.lstrip("#")
+            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return f"rgba({r},{g},{b},{a})"
+
+    traces = []
+    try:
+        all_segs = csf.allsegs  # disponível até matplotlib 3.9 (removido no 3.10)
+    except AttributeError:
+        all_segs = []
+
+    for i, segs in enumerate(all_segs):
+        fc = _to_rgba(hex_colors[i], alpha)
+        for seg in segs:
+            if len(seg) < 3:
+                continue
+            # Um trace por polígono — fill='toself' funciona corretamente
+            traces.append(_go.Scattergeo(
+                lat=seg[:, 1].tolist(),
+                lon=seg[:, 0].tolist(),
+                mode="lines",
+                fill="toself",
+                fillcolor=fc,
+                line=dict(color="rgba(0,0,0,0)", width=0),
+                showlegend=False,
+                hoverinfo="skip",
+            ))
+
+    # Trace invisível para colorbar
+    traces.append(_go.Scattergeo(
+        lat=[None], lon=[None], mode="markers",
+        marker=dict(
+            colorscale=colorscale,
+            cmin=_vmin, cmax=_vmax,
+            color=[(_vmin + _vmax) / 2],
+            colorbar=dict(title=unit, thickness=14, len=0.65),
+            showscale=True, size=0,
+        ),
+        showlegend=False, hoverinfo="skip",
+    ))
+
+    return traces
+
+
 def geo_contour_traces(z_2d: np.ndarray, colorscale: str, unit: str,
                        n_levels: int = 8, vmin: float = None, vmax: float = None):
     """
