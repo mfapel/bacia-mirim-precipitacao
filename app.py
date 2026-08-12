@@ -16,7 +16,7 @@ from inmet_api import get_stations, get_accumulated, get_daily_series
 from forecast_api import get_ecmwf_15d, get_gfs_ensemble, BASIN_LAT, BASIN_LON
 from forecast_map_api import (
     get_forecast_grid, get_municipios_geojson, geojson_to_latlon,
-    build_wind_vectors, geo_contour_traces, geo_pixel_trace,
+    build_wind_vectors, geo_contour_traces,
     GRID_LATS, GRID_LONS, GRID_LAT_FLAT, GRID_LON_FLAT,
 )
 from ana_api import (get_nivel_serie, get_nivel_atual, ESTACOES_NIVEL,
@@ -799,8 +799,8 @@ else:
         key="map_day_slider",
     )
 
-    tab_precip, tab_wind, tab_gusts = st.tabs(
-        ["Precipitação (mm)", "Vento 10m (km/h)", "Rajada (km/h)"]
+    tab_wind, tab_gusts = st.tabs(
+        ["Vento 10m (km/h)", "Rajada (km/h)"]
     )
 
     # Elementos comuns a todos os mapas
@@ -818,7 +818,6 @@ else:
     )
 
     def _base_traces():
-        """Retorna traces base: limites municipais."""
         traces = []
         if mun_lats:
             traces.append(go.Scattergeo(
@@ -828,24 +827,8 @@ else:
             ))
         return traces
 
-    vmax_p = float(np.nanmax(grid_data["precip"])) or 1.0
-    vmax_w = float(np.nanmax(grid_data["wind"]))   or 1.0
-    vmax_g = float(np.nanmax(grid_data["gusts"]))  or 1.0
-
-    # ── Precipitação ──────────────────────────────────────────────────────────
-    with tab_precip:
-        z_p = grid_data["precip"][:, :, day_idx]
-        fig_p = go.Figure(_base_traces())
-        for tr in geo_pixel_trace(z_p, "Blues", "mm", vmin=0, vmax=vmax_p, opacity=0.35):
-            fig_p.add_trace(tr)
-        for tr in geo_contour_traces(z_p, "Blues", "mm", n_levels=8, vmin=0, vmax=vmax_p):
-            fig_p.add_trace(tr)
-        fig_p.update_layout(
-            geo=GEO_LAYOUT, height=500,
-            margin=dict(l=0, r=0, t=35, b=0),
-            title=dict(text=f"Precipitação diária — {day_labels[day_idx]}", font=dict(size=13)),
-        )
-        st.plotly_chart(fig_p, use_container_width=True)
+    vmax_w = float(np.nanmax(grid_data["wind"]))  or 1.0
+    vmax_g = float(np.nanmax(grid_data["gusts"])) or 1.0
 
     # ── Vento 10m com vetores ─────────────────────────────────────────────────
     with tab_wind:
