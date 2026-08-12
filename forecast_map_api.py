@@ -205,6 +205,75 @@ def build_wind_vectors(u_2d: np.ndarray, v_2d: np.ndarray,
     return arrow_lats, arrow_lons
 
 
+def geo_pixel_trace(z_2d: np.ndarray, colorscale: str, unit: str,
+                    vmin: float = None, vmax: float = None,
+                    opacity: float = 0.35):
+    """
+    Renderiza a grade como pixels de 0.5°×0.5° via go.Choropleth.
+    Cada célula é um polígono GeoJSON colorido pelo valor z.
+    opacity baixo mantém o mapa de fundo visível.
+    """
+    import plotly.graph_objects as _go
+
+    z = z_2d.copy()
+    valid = z[~np.isnan(z)]
+    if valid.size == 0:
+        return []
+
+    _vmin = float(vmin if vmin is not None else valid.min())
+    _vmax = float(vmax if vmax is not None else valid.max())
+    if _vmax <= _vmin:
+        _vmax = _vmin + 1.0
+
+    dlat = abs(float(GRID_LATS[1] - GRID_LATS[0])) / 2
+    dlon = abs(float(GRID_LONS[1] - GRID_LONS[0])) / 2
+
+    features, locations, z_vals = [], [], []
+    for ii, lat in enumerate(GRID_LATS):
+        for jj, lon in enumerate(GRID_LONS):
+            v = float(z[ii, jj])
+            if np.isnan(v):
+                continue
+            cell_id = f"c{ii}_{jj}"
+            features.append({
+                "type": "Feature",
+                "id": cell_id,
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [lon - dlon, lat - dlat],
+                        [lon + dlon, lat - dlat],
+                        [lon + dlon, lat + dlat],
+                        [lon - dlon, lat + dlat],
+                        [lon - dlon, lat - dlat],
+                    ]],
+                },
+                "properties": {},
+            })
+            locations.append(cell_id)
+            z_vals.append(v)
+
+    if not features:
+        return []
+
+    geojson = {"type": "FeatureCollection", "features": features}
+
+    return [_go.Choropleth(
+        geojson=geojson,
+        locations=locations,
+        z=z_vals,
+        featureidkey="id",
+        colorscale=colorscale,
+        zmin=_vmin,
+        zmax=_vmax,
+        marker_opacity=opacity,
+        marker_line_width=0,
+        colorbar=dict(title=unit, thickness=14, len=0.65),
+        hoverinfo="skip",
+        showscale=True,
+    )]
+
+
 def geo_shaded_traces(z_2d: np.ndarray, colorscale: str, unit: str,
                       n_levels: int = 8, vmin: float = None, vmax: float = None,
                       alpha: float = 0.5):

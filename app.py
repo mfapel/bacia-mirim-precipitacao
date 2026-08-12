@@ -16,7 +16,7 @@ from inmet_api import get_stations, get_accumulated, get_daily_series
 from forecast_api import get_ecmwf_15d, get_gfs_ensemble, BASIN_LAT, BASIN_LON
 from forecast_map_api import (
     get_forecast_grid, get_municipios_geojson, geojson_to_latlon,
-    build_wind_vectors, geo_contour_traces,
+    build_wind_vectors, geo_contour_traces, geo_pixel_trace,
     GRID_LATS, GRID_LONS, GRID_LAT_FLAT, GRID_LON_FLAT,
 )
 from ana_api import (get_nivel_serie, get_nivel_atual, ESTACOES_NIVEL,
@@ -836,6 +836,8 @@ else:
     with tab_precip:
         z_p = grid_data["precip"][:, :, day_idx]
         fig_p = go.Figure(_base_traces())
+        for tr in geo_pixel_trace(z_p, "Blues", "mm", vmin=0, vmax=vmax_p, opacity=0.35):
+            fig_p.add_trace(tr)
         for tr in geo_contour_traces(z_p, "Blues", "mm", n_levels=8, vmin=0, vmax=vmax_p):
             fig_p.add_trace(tr)
         fig_p.update_layout(
