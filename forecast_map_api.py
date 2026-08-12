@@ -206,11 +206,11 @@ def build_wind_vectors(u_2d: np.ndarray, v_2d: np.ndarray,
 
 
 def geo_contour_traces(z_2d: np.ndarray, colorscale: str, unit: str,
-                       n_levels: int = 8, vmin: float = None, vmax: float = None):
+                       n_levels: int = 8, vmin: float = None, vmax: float = None,
+                       alpha: float = 0.45):
     """
-    Extrai linhas de contorno de z_2d (shape n_lats x n_lons) usando matplotlib
-    e retorna lista de go.Scattergeo prontos para sobreposição num mapa geo.
-
+    Gera preenchimento sombreado transparente (contourf) sobre mapa geo.
+    Cada banda de nível vira um go.Scattergeo fill="toself" com cor semi-transparente.
     Inclui trace invisível para colorbar.
     """
     import matplotlib
@@ -220,8 +220,7 @@ def geo_contour_traces(z_2d: np.ndarray, colorscale: str, unit: str,
     import plotly.colors as pc
 
     z = z_2d.copy()
-    z_valid = z[~np.isnan(z)]
-    if z_valid.size == 0:
+    if z[~np.isnan(z)].size == 0:
         return []
 
     _vmin = float(vmin if vmin is not None else np.nanmin(z))
@@ -229,35 +228,48 @@ def geo_contour_traces(z_2d: np.ndarray, colorscale: str, unit: str,
     if _vmax <= _vmin:
         _vmax = _vmin + 1.0
 
-    # Substitui NaN pela média para não quebrar o contour
     z = np.where(np.isnan(z), np.nanmean(z), z)
-
     levels = np.linspace(_vmin, _vmax, n_levels + 1)
 
     fig_mpl, ax = plt.subplots()
-    cs = ax.contour(GRID_LONS, GRID_LATS, z, levels=levels)
+    csf = ax.contourf(GRID_LONS, GRID_LATS, z, levels=levels)
     plt.close(fig_mpl)
 
-    # Cores interpoladas do colorscale escolhido
-    norm_positions = (levels - _vmin) / (_vmax - _vmin)
-    colors = pc.sample_colorscale(colorscale, np.clip(norm_positions, 0, 1).tolist())
+    # Cores do colorscale para os intervalos entre níveis (n_levels cores)
+    mids = (levels[:-1] + levels[1:]) / 2
+    norm = np.clip((mids - _vmin) / (_vmax - _vmin), 0, 1).tolist()
+    hex_colors = pc.sample_colorscale(colorscale, norm)
+
+    def _hex_to_rgba(h, a):
+        h = h.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return f"rgba({r},{g},{b},{a})"
 
     traces = []
-    for i, (level, segs) in enumerate(zip(cs.levels, cs.allsegs)):
-        seg_lats, seg_lons = [], []
-        for seg in segs:
-            if seg.shape[0] < 2:
-                continue
-            seg_lons += seg[:, 0].tolist() + [None]
-            seg_lats += seg[:, 1].tolist() + [None]
-        if not seg_lats:
-            continue
-        traces.append(_go.Scattergeo(
-            lat=seg_lats, lon=seg_lons, mode="lines",
-            line=dict(color=colors[i], width=1.8),
-            name=f"{level:.1f} {unit}",
-            showlegend=False, hoverinfo="skip",
-        ))
+    for i, collection in enumerate(csf.collections):
+        fill_color = _hex_to_rgba(hex_colors[i], alpha)
+        for path in collection.get_paths():
+            verts = path.vertices
+            codes = path.codes
+            # Divide caminhos compostos no código MOVETO (1)
+            if codes is not None:
+                starts = list(np.where(codes == 1)[0]) + [len(verts)]
+            else:
+                starts = [0, len(verts)]
+            for k in range(len(starts) - 1):
+                sub = verts[starts[k]:starts[k + 1]]
+                if len(sub) < 3:
+                    continue
+                traces.append(_go.Scattergeo(
+                    lat=sub[:, 1].tolist(),
+                    lon=sub[:, 0].tolist(),
+                    mode="lines",
+                    fill="toself",
+                    fillcolor=fill_color,
+                    line=dict(color="rgba(0,0,0,0)", width=0),
+                    showlegend=False,
+                    hoverinfo="skip",
+                ))
 
     # Trace invisível para colorbar
     traces.append(_go.Scattergeo(
