@@ -5,3 +5,4 @@ plotly>=5.22.0
 pandas>=2.2.0
 requests>=2.32.0
 numpy>=1.26.0
+matplotlib>=3.8.0

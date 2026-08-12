@@ -16,8 +16,9 @@ from inmet_api import get_stations, get_accumulated, get_daily_series
 from forecast_api import get_ecmwf_15d, get_gfs_ensemble, BASIN_LAT, BASIN_LON
 from forecast_map_api import (
     get_forecast_grid, get_municipios_geojson, geojson_to_latlon,
-    build_wind_vectors, geo_shaded_trace,
+    build_wind_vectors, geo_contour_traces,
     GRID_LATS, GRID_LONS, GRID_LAT_FLAT, GRID_LON_FLAT,
+    LAGOA_MIRIM_LAT, LAGOA_MIRIM_LON,
 )
 from ana_api import (get_nivel_serie, get_nivel_atual, ESTACOES_NIVEL,
                      estimar_sangradouro, get_sangradouro_serie,
@@ -826,6 +827,14 @@ else:
                 line=dict(color="#777", width=0.8),
                 name="Municípios", showlegend=False, hoverinfo="skip",
             ))
+        traces.append(go.Scattergeo(
+            lat=LAGOA_MIRIM_LAT + [LAGOA_MIRIM_LAT[0]],
+            lon=LAGOA_MIRIM_LON + [LAGOA_MIRIM_LON[0]],
+            mode="lines", fill="toself",
+            fillcolor="rgba(52,152,219,0.35)",
+            line=dict(color="#2471A3", width=1.5),
+            name="Lagoa Mirim", showlegend=True, hoverinfo="skip",
+        ))
         return traces
 
     vmax_p = float(np.nanmax(grid_data["precip"])) or 1.0
@@ -836,7 +845,7 @@ else:
     with tab_precip:
         z_p = grid_data["precip"][:, :, day_idx]
         fig_p = go.Figure(_base_traces())
-        for tr in geo_shaded_trace(z_p, "Blues", "mm", vmin=0, vmax=vmax_p):
+        for tr in geo_contour_traces(z_p, "Blues", "mm", n_levels=8, vmin=0, vmax=vmax_p):
             fig_p.add_trace(tr)
         fig_p.update_layout(
             geo=GEO_LAYOUT, height=500,
@@ -853,7 +862,7 @@ else:
         arr_lats, arr_lons = build_wind_vectors(u_2d, v_2d)
 
         fig_w = go.Figure(_base_traces())
-        for tr in geo_shaded_trace(z_w, "YlOrRd", "km/h", vmin=0, vmax=vmax_w):
+        for tr in geo_contour_traces(z_w, "YlOrRd", "km/h", n_levels=8, vmin=0, vmax=vmax_w):
             fig_w.add_trace(tr)
         if arr_lats:
             fig_w.add_trace(go.Scattergeo(
@@ -876,7 +885,7 @@ else:
         arr_lats, arr_lons = build_wind_vectors(u_2d, v_2d)
 
         fig_g = go.Figure(_base_traces())
-        for tr in geo_shaded_trace(z_g, "OrRd", "km/h", vmin=0, vmax=vmax_g):
+        for tr in geo_contour_traces(z_g, "OrRd", "km/h", n_levels=8, vmin=0, vmax=vmax_g):
             fig_g.add_trace(tr)
         if arr_lats:
             fig_g.add_trace(go.Scattergeo(
