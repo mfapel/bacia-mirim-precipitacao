@@ -203,3 +203,73 @@ def build_wind_vectors(u_2d: np.ndarray, v_2d: np.ndarray,
                     arrow_lons += [lon1, lon1 + ah * np.cos(a), None]
 
     return arrow_lats, arrow_lons
+
+
+def geo_contour_traces(z_2d: np.ndarray, colorscale: str, unit: str,
+                       n_levels: int = 8, vmin: float = None, vmax: float = None):
+    """
+    Extrai linhas de contorno de z_2d (shape n_lats x n_lons) usando matplotlib
+    e retorna lista de go.Scattergeo prontos para sobreposição num mapa geo.
+
+    Inclui trace invisível para colorbar.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import plotly.graph_objects as _go
+    import plotly.colors as pc
+
+    z = z_2d.copy()
+    z_valid = z[~np.isnan(z)]
+    if z_valid.size == 0:
+        return []
+
+    _vmin = float(vmin if vmin is not None else np.nanmin(z))
+    _vmax = float(vmax if vmax is not None else np.nanmax(z))
+    if _vmax <= _vmin:
+        _vmax = _vmin + 1.0
+
+    # Substitui NaN pela média para não quebrar o contour
+    z = np.where(np.isnan(z), np.nanmean(z), z)
+
+    levels = np.linspace(_vmin, _vmax, n_levels + 1)
+
+    fig_mpl, ax = plt.subplots()
+    cs = ax.contour(GRID_LONS, GRID_LATS, z, levels=levels)
+    plt.close(fig_mpl)
+
+    # Cores interpoladas do colorscale escolhido
+    norm_positions = (levels - _vmin) / (_vmax - _vmin)
+    colors = pc.sample_colorscale(colorscale, np.clip(norm_positions, 0, 1).tolist())
+
+    traces = []
+    for i, (level, segs) in enumerate(zip(cs.levels, cs.allsegs)):
+        seg_lats, seg_lons = [], []
+        for seg in segs:
+            if seg.shape[0] < 2:
+                continue
+            seg_lons += seg[:, 0].tolist() + [None]
+            seg_lats += seg[:, 1].tolist() + [None]
+        if not seg_lats:
+            continue
+        traces.append(_go.Scattergeo(
+            lat=seg_lats, lon=seg_lons, mode="lines",
+            line=dict(color=colors[i], width=1.8),
+            name=f"{level:.1f} {unit}",
+            showlegend=False, hoverinfo="skip",
+        ))
+
+    # Trace invisível para colorbar
+    traces.append(_go.Scattergeo(
+        lat=[None], lon=[None], mode="markers",
+        marker=dict(
+            colorscale=colorscale,
+            cmin=_vmin, cmax=_vmax,
+            color=[(_vmin + _vmax) / 2],
+            colorbar=dict(title=unit, thickness=14, len=0.65),
+            showscale=True, size=0,
+        ),
+        showlegend=False, hoverinfo="skip",
+    ))
+
+    return traces

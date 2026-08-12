@@ -15,7 +15,8 @@ from datetime import datetime, date
 from inmet_api import get_stations, get_accumulated, get_daily_series
 from forecast_api import get_ecmwf_15d, get_gfs_ensemble, BASIN_LAT, BASIN_LON
 from forecast_map_api import (
-    get_forecast_grid, get_municipios_geojson, geojson_to_latlon, build_wind_vectors,
+    get_forecast_grid, get_municipios_geojson, geojson_to_latlon,
+    build_wind_vectors, geo_contour_traces,
     GRID_LATS, GRID_LONS, GRID_LAT_FLAT, GRID_LON_FLAT,
     LAGOA_MIRIM_LAT, LAGOA_MIRIM_LON,
 )
@@ -836,25 +837,16 @@ else:
         ))
         return traces
 
+    vmax_p = float(np.nanmax(grid_data["precip"])) or 1.0
+    vmax_w = float(np.nanmax(grid_data["wind"]))   or 1.0
+    vmax_g = float(np.nanmax(grid_data["gusts"]))  or 1.0
+
     # ── Precipitação ──────────────────────────────────────────────────────────
     with tab_precip:
-        z_p   = grid_data["precip"][:, :, day_idx].flatten()
-        cmax_p = float(np.nanmax(grid_data["precip"])) or 1.0
-
+        z_p = grid_data["precip"][:, :, day_idx]
         fig_p = go.Figure(_base_traces())
-        fig_p.add_trace(go.Scattergeo(
-            lat=GRID_LAT_FLAT, lon=GRID_LON_FLAT,
-            mode="markers",
-            marker=dict(
-                color=z_p, colorscale="Blues", size=14, opacity=0.85,
-                cmin=0, cmax=cmax_p,
-                colorbar=dict(title="mm", thickness=14, len=0.7),
-                line=dict(color="white", width=0.4),
-            ),
-            text=[f"{v:.1f} mm" if not np.isnan(v) else "—" for v in z_p],
-            hovertemplate="%{text}<extra></extra>",
-            name="Precipitação",
-        ))
+        for tr in geo_contour_traces(z_p, "Blues", "mm", n_levels=8, vmin=0, vmax=vmax_p):
+            fig_p.add_trace(tr)
         fig_p.update_layout(
             geo=GEO_LAYOUT, height=500,
             margin=dict(l=0, r=0, t=35, b=0),
@@ -864,31 +856,19 @@ else:
 
     # ── Vento 10m com vetores ─────────────────────────────────────────────────
     with tab_wind:
-        z_w    = grid_data["wind"][:, :, day_idx].flatten()
-        cmax_w = float(np.nanmax(grid_data["wind"])) or 1.0
-        u_2d   = grid_data["u_wind"][:, :, day_idx]
-        v_2d   = grid_data["v_wind"][:, :, day_idx]
+        z_w  = grid_data["wind"][:, :, day_idx]
+        u_2d = grid_data["u_wind"][:, :, day_idx]
+        v_2d = grid_data["v_wind"][:, :, day_idx]
         arr_lats, arr_lons = build_wind_vectors(u_2d, v_2d)
 
         fig_w = go.Figure(_base_traces())
-        fig_w.add_trace(go.Scattergeo(
-            lat=GRID_LAT_FLAT, lon=GRID_LON_FLAT,
-            mode="markers",
-            marker=dict(
-                color=z_w, colorscale="YlOrRd", size=13, opacity=0.7,
-                cmin=0, cmax=cmax_w,
-                colorbar=dict(title="km/h", thickness=14, len=0.7),
-                line=dict(color="white", width=0.3),
-            ),
-            text=[f"{v:.0f} km/h" if not np.isnan(v) else "—" for v in z_w],
-            hovertemplate="%{text}<extra></extra>",
-            name="Velocidade 10m",
-        ))
+        for tr in geo_contour_traces(z_w, "YlOrRd", "km/h", n_levels=8, vmin=0, vmax=vmax_w):
+            fig_w.add_trace(tr)
         if arr_lats:
             fig_w.add_trace(go.Scattergeo(
                 lat=arr_lats, lon=arr_lons, mode="lines",
                 line=dict(color="#1C2833", width=1.3),
-                name="Direção do vento", showlegend=True, hoverinfo="skip",
+                name="Direção do vento", showlegend=False, hoverinfo="skip",
             ))
         fig_w.update_layout(
             geo=GEO_LAYOUT, height=500,
@@ -899,23 +879,20 @@ else:
 
     # ── Rajada ────────────────────────────────────────────────────────────────
     with tab_gusts:
-        z_g    = grid_data["gusts"][:, :, day_idx].flatten()
-        cmax_g = float(np.nanmax(grid_data["gusts"])) or 1.0
+        z_g  = grid_data["gusts"][:, :, day_idx]
+        u_2d = grid_data["u_wind"][:, :, day_idx]
+        v_2d = grid_data["v_wind"][:, :, day_idx]
+        arr_lats, arr_lons = build_wind_vectors(u_2d, v_2d)
 
         fig_g = go.Figure(_base_traces())
-        fig_g.add_trace(go.Scattergeo(
-            lat=GRID_LAT_FLAT, lon=GRID_LON_FLAT,
-            mode="markers",
-            marker=dict(
-                color=z_g, colorscale="OrRd", size=14, opacity=0.85,
-                cmin=0, cmax=cmax_g,
-                colorbar=dict(title="km/h", thickness=14, len=0.7),
-                line=dict(color="white", width=0.4),
-            ),
-            text=[f"{v:.0f} km/h" if not np.isnan(v) else "—" for v in z_g],
-            hovertemplate="%{text}<extra></extra>",
-            name="Rajada",
-        ))
+        for tr in geo_contour_traces(z_g, "OrRd", "km/h", n_levels=8, vmin=0, vmax=vmax_g):
+            fig_g.add_trace(tr)
+        if arr_lats:
+            fig_g.add_trace(go.Scattergeo(
+                lat=arr_lats, lon=arr_lons, mode="lines",
+                line=dict(color="#1C2833", width=1.3),
+                name="Direção do vento", showlegend=False, hoverinfo="skip",
+            ))
         fig_g.update_layout(
             geo=GEO_LAYOUT, height=500,
             margin=dict(l=0, r=0, t=35, b=0),
