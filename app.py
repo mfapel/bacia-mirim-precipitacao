@@ -827,14 +827,6 @@ else:
                 line=dict(color="#777", width=0.8),
                 name="Municípios", showlegend=False, hoverinfo="skip",
             ))
-        traces.append(go.Scattergeo(
-            lat=LAGOA_MIRIM_LAT + [LAGOA_MIRIM_LAT[0]],
-            lon=LAGOA_MIRIM_LON + [LAGOA_MIRIM_LON[0]],
-            mode="lines", fill="toself",
-            fillcolor="rgba(52,152,219,0.35)",
-            line=dict(color="#2471A3", width=1.5),
-            name="Lagoa Mirim", showlegend=True, hoverinfo="skip",
-        ))
         return traces
 
     vmax_p = float(np.nanmax(grid_data["precip"])) or 1.0

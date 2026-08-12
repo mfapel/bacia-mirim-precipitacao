@@ -209,13 +209,10 @@ def geo_contour_traces(z_2d: np.ndarray, colorscale: str, unit: str,
                        n_levels: int = 8, vmin: float = None, vmax: float = None,
                        alpha: float = 0.45):
     """
-    Gera preenchimento sombreado transparente (contourf) sobre mapa geo.
-    Cada banda de nível vira um go.Scattergeo fill="toself" com cor semi-transparente.
-    Inclui trace invisível para colorbar.
+    Shading transparente sobre mapa geo: divide z_2d em bandas de nível e
+    desenha retângulos (células da grade) coloridos como go.Scattergeo.
+    Não depende de matplotlib — funciona com qualquer versão.
     """
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
     import plotly.graph_objects as _go
     import plotly.colors as pc
 
@@ -228,14 +225,8 @@ def geo_contour_traces(z_2d: np.ndarray, colorscale: str, unit: str,
     if _vmax <= _vmin:
         _vmax = _vmin + 1.0
 
-    z = np.where(np.isnan(z), np.nanmean(z), z)
     levels = np.linspace(_vmin, _vmax, n_levels + 1)
 
-    fig_mpl, ax = plt.subplots()
-    csf = ax.contourf(GRID_LONS, GRID_LATS, z, levels=levels)
-    plt.close(fig_mpl)
-
-    # Cores do colorscale para os intervalos entre níveis (n_levels cores)
     mids = (levels[:-1] + levels[1:]) / 2
     norm = np.clip((mids - _vmin) / (_vmax - _vmin), 0, 1).tolist()
     hex_colors = pc.sample_colorscale(colorscale, norm)
@@ -245,33 +236,36 @@ def geo_contour_traces(z_2d: np.ndarray, colorscale: str, unit: str,
         r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
         return f"rgba({r},{g},{b},{a})"
 
-    traces = []
-    for i, collection in enumerate(csf.collections):
-        fill_color = _hex_to_rgba(hex_colors[i], alpha)
-        for path in collection.get_paths():
-            verts = path.vertices
-            codes = path.codes
-            # Divide caminhos compostos no código MOVETO (1)
-            if codes is not None:
-                starts = list(np.where(codes == 1)[0]) + [len(verts)]
-            else:
-                starts = [0, len(verts)]
-            for k in range(len(starts) - 1):
-                sub = verts[starts[k]:starts[k + 1]]
-                if len(sub) < 3:
-                    continue
-                traces.append(_go.Scattergeo(
-                    lat=sub[:, 1].tolist(),
-                    lon=sub[:, 0].tolist(),
-                    mode="lines",
-                    fill="toself",
-                    fillcolor=fill_color,
-                    line=dict(color="rgba(0,0,0,0)", width=0),
-                    showlegend=False,
-                    hoverinfo="skip",
-                ))
+    # Passo da grade (0.5°)
+    dlat = abs(float(GRID_LATS[1] - GRID_LATS[0])) / 2
+    dlon = abs(float(GRID_LONS[1] - GRID_LONS[0])) / 2
 
-    # Trace invisível para colorbar
+    traces = []
+    for i in range(len(levels) - 1):
+        lo, hi = levels[i], levels[i + 1]
+        fill_color = _hex_to_rgba(hex_colors[i], alpha)
+
+        rect_lats, rect_lons = [], []
+        for ii, lat in enumerate(GRID_LATS):
+            for jj, lon in enumerate(GRID_LONS):
+                v = z[ii, jj]
+                if np.isnan(v) or v < lo or v >= hi:
+                    continue
+                # Retângulo da célula (sentido horário, fechado)
+                rect_lats += [lat - dlat, lat - dlat, lat + dlat, lat + dlat, lat - dlat, None]
+                rect_lons += [lon - dlon, lon + dlon, lon + dlon, lon - dlon, lon - dlon, None]
+
+        if not rect_lats:
+            continue
+        traces.append(_go.Scattergeo(
+            lat=rect_lats, lon=rect_lons,
+            mode="lines", fill="toself",
+            fillcolor=fill_color,
+            line=dict(color="rgba(0,0,0,0)", width=0),
+            showlegend=False, hoverinfo="skip",
+        ))
+
+    # Trace invisível apenas para colorbar
     traces.append(_go.Scattergeo(
         lat=[None], lon=[None], mode="markers",
         marker=dict(
