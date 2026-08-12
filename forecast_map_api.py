@@ -205,83 +205,70 @@ def build_wind_vectors(u_2d: np.ndarray, v_2d: np.ndarray,
     return arrow_lats, arrow_lons
 
 
-def geo_contour_traces(z_2d: np.ndarray, colorscale: str, unit: str,
-                       n_levels: int = 8, vmin: float = None, vmax: float = None,
-                       alpha: float = 0.45):
+def geo_shaded_trace(z_2d: np.ndarray, colorscale: str, unit: str,
+                     vmin: float = None, vmax: float = None,
+                     alpha: float = 0.5):
     """
-    Shading transparente sobre mapa geo: divide z_2d em bandas de nível e
-    desenha retângulos (células da grade) coloridos como go.Scattergeo.
-    Não depende de matplotlib — funciona com qualquer versão.
+    Shading transparente via go.Choropleth com GeoJSON de células da grade.
+    Cada célula 0.5°×0.5° vira um polígono com valor z — renderização correta.
+    Retorna lista com [go.Choropleth].
     """
     import plotly.graph_objects as _go
-    import plotly.colors as pc
 
     z = z_2d.copy()
-    if z[~np.isnan(z)].size == 0:
+    valid = z[~np.isnan(z)]
+    if valid.size == 0:
         return []
 
-    _vmin = float(vmin if vmin is not None else np.nanmin(z))
-    _vmax = float(vmax if vmax is not None else np.nanmax(z))
+    _vmin = float(vmin if vmin is not None else valid.min())
+    _vmax = float(vmax if vmax is not None else valid.max())
     if _vmax <= _vmin:
         _vmax = _vmin + 1.0
 
-    levels = np.linspace(_vmin, _vmax, n_levels + 1)
-
-    mids = (levels[:-1] + levels[1:]) / 2
-    norm = np.clip((mids - _vmin) / (_vmax - _vmin), 0, 1).tolist()
-    hex_colors = pc.sample_colorscale(colorscale, norm)
-
-    def _to_rgba(color, a):
-        import re
-        # Aceita "rgb(r,g,b)" ou "#rrggbb"
-        m = re.match(r"rgb\((\d+),\s*(\d+),\s*(\d+)\)", color)
-        if m:
-            r, g, b = m.group(1), m.group(2), m.group(3)
-        else:
-            h = color.lstrip("#")
-            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-        return f"rgba({r},{g},{b},{a})"
-
-    # Passo da grade (0.5°)
     dlat = abs(float(GRID_LATS[1] - GRID_LATS[0])) / 2
     dlon = abs(float(GRID_LONS[1] - GRID_LONS[0])) / 2
 
-    traces = []
-    for i in range(len(levels) - 1):
-        lo, hi = levels[i], levels[i + 1]
-        fill_color = _to_rgba(hex_colors[i], alpha)
+    features, locations, z_vals = [], [], []
+    for ii, lat in enumerate(GRID_LATS):
+        for jj, lon in enumerate(GRID_LONS):
+            v = float(z[ii, jj])
+            if np.isnan(v):
+                continue
+            cell_id = f"{ii}_{jj}"
+            features.append({
+                "type": "Feature",
+                "id": cell_id,
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [lon - dlon, lat - dlat],
+                        [lon + dlon, lat - dlat],
+                        [lon + dlon, lat + dlat],
+                        [lon - dlon, lat + dlat],
+                        [lon - dlon, lat - dlat],
+                    ]],
+                },
+                "properties": {},
+            })
+            locations.append(cell_id)
+            z_vals.append(v)
 
-        rect_lats, rect_lons = [], []
-        for ii, lat in enumerate(GRID_LATS):
-            for jj, lon in enumerate(GRID_LONS):
-                v = z[ii, jj]
-                if np.isnan(v) or v < lo or v >= hi:
-                    continue
-                # Retângulo da célula (sentido horário, fechado)
-                rect_lats += [lat - dlat, lat - dlat, lat + dlat, lat + dlat, lat - dlat, None]
-                rect_lons += [lon - dlon, lon + dlon, lon + dlon, lon - dlon, lon - dlon, None]
+    if not features:
+        return []
 
-        if not rect_lats:
-            continue
-        traces.append(_go.Scattergeo(
-            lat=rect_lats, lon=rect_lons,
-            mode="lines", fill="toself",
-            fillcolor=fill_color,
-            line=dict(color="rgba(0,0,0,0)", width=0),
-            showlegend=False, hoverinfo="skip",
-        ))
+    geojson = {"type": "FeatureCollection", "features": features}
 
-    # Trace invisível apenas para colorbar
-    traces.append(_go.Scattergeo(
-        lat=[None], lon=[None], mode="markers",
-        marker=dict(
-            colorscale=colorscale,
-            cmin=_vmin, cmax=_vmax,
-            color=[(_vmin + _vmax) / 2],
-            colorbar=dict(title=unit, thickness=14, len=0.65),
-            showscale=True, size=0,
-        ),
-        showlegend=False, hoverinfo="skip",
-    ))
-
-    return traces
+    return [_go.Choropleth(
+        geojson=geojson,
+        locations=locations,
+        z=z_vals,
+        featureidkey="id",
+        colorscale=colorscale,
+        zmin=_vmin,
+        zmax=_vmax,
+        marker_opacity=alpha,
+        marker_line_width=0,
+        colorbar=dict(title=unit, thickness=14, len=0.65),
+        hoverinfo="skip",
+        showscale=True,
+    )]
