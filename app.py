@@ -13,7 +13,11 @@ from datetime import datetime, date
 
 from inmet_api import get_stations, get_accumulated, get_daily_series
 from forecast_api import get_ecmwf_15d, get_gfs_ensemble, BASIN_LAT, BASIN_LON
-from forecast_map_api import get_forecast_grid, GRID_LATS, GRID_LONS
+from forecast_map_api import (
+    get_forecast_grid, get_municipios_geojson, geojson_to_latlon, build_wind_vectors,
+    GRID_LATS, GRID_LONS, GRID_LAT_FLAT, GRID_LON_FLAT,
+    LAGOA_MIRIM_LAT, LAGOA_MIRIM_LON,
+)
 from ana_api import (get_nivel_serie, get_nivel_atual, ESTACOES_NIVEL,
                      estimar_sangradouro, get_sangradouro_serie,
                      estimar_sangradouro_b, get_sangradouro_serie_b, calibrar_modelo_b,
@@ -772,19 +776,21 @@ with tab_35d:
 st.markdown("---")
 st.subheader("Campos Espaciais de Previsão — Região da Lagoa Mirim")
 st.caption(
-    "Grade 10×13 pontos · resolução 0.5° · Open-Meteo best_match · horizonte 15 dias"
+    "Grade 10×13 pontos · resolução 0.5° · Open-Meteo best_match · horizonte 15 dias · "
+    "Vetores de vento: direção e intensidade"
 )
 
-with st.spinner("Carregando grade de previsão..."):
-    grid_data = get_forecast_grid()
+with st.spinner("Carregando grade de previsão e limites municipais..."):
+    grid_data   = get_forecast_grid()
+    gj_municipios = get_municipios_geojson()
 
 if not grid_data:
     st.warning("Campos espaciais indisponíveis no momento.")
 else:
-    dates = grid_data["dates"]
-    n_days = len(dates)
-
+    dates    = grid_data["dates"]
+    n_days   = len(dates)
     day_labels = [d.strftime("%d/%m") for d in dates]
+
     day_idx = st.select_slider(
         "Selecione o dia da previsão",
         options=list(range(n_days)),
@@ -796,38 +802,124 @@ else:
         ["Precipitação (mm)", "Vento 10m (km/h)", "Rajada (km/h)"]
     )
 
-    def _make_contour(z_data, title, colorscale, unit, day_i):
-        z = z_data[:, :, day_i]
-        fig = go.Figure(go.Contour(
-            z=z,
-            x=GRID_LONS.tolist(),
-            y=GRID_LATS.tolist(),
-            colorscale=colorscale,
-            contours=dict(showlabels=True, labelfont=dict(size=10, color="white")),
-            colorbar=dict(title=unit, thickness=14),
-            hovertemplate="Lon: %{x:.1f}°<br>Lat: %{y:.1f}°<br>" + title + ": %{z:.1f} " + unit + "<extra></extra>",
-        ))
-        fig.update_layout(
-            height=420,
-            margin=dict(l=0, r=0, t=30, b=0),
-            xaxis_title="Longitude (°W)",
-            yaxis_title="Latitude (°S)",
-            title=dict(text=f"{title} — {day_labels[day_i]}", font=dict(size=13)),
-            xaxis=dict(tickformat=".1f"),
-            yaxis=dict(tickformat=".1f", scaleanchor="x", scaleratio=1),
-        )
-        return fig
+    # Elementos comuns a todos os mapas
+    mun_lats, mun_lons = geojson_to_latlon(gj_municipios)
 
+    GEO_LAYOUT = dict(
+        projection_type="mercator",
+        showland=True,  landcolor="#F0EDE8",
+        showcoastlines=True, coastlinecolor="#888",
+        showocean=True, oceancolor="#D6EAF8",
+        showlakes=True, lakecolor="#AED6F1",
+        lataxis=dict(range=[-35.3, -29.7]),
+        lonaxis=dict(range=[-56.3, -49.0]),
+        showframe=True, framecolor="#AAA",
+    )
+
+    def _base_traces():
+        """Retorna traces base: limites municipais + Lagoa Mirim."""
+        traces = []
+        if mun_lats:
+            traces.append(go.Scattergeo(
+                lat=mun_lats, lon=mun_lons, mode="lines",
+                line=dict(color="#777", width=0.8),
+                name="Municípios", showlegend=False, hoverinfo="skip",
+            ))
+        traces.append(go.Scattergeo(
+            lat=LAGOA_MIRIM_LAT + [LAGOA_MIRIM_LAT[0]],
+            lon=LAGOA_MIRIM_LON + [LAGOA_MIRIM_LON[0]],
+            mode="lines", fill="toself",
+            fillcolor="rgba(52,152,219,0.35)",
+            line=dict(color="#2471A3", width=1.5),
+            name="Lagoa Mirim", showlegend=True, hoverinfo="skip",
+        ))
+        return traces
+
+    # ── Precipitação ──────────────────────────────────────────────────────────
     with tab_precip:
-        fig_p = _make_contour(grid_data["precip"], "Precipitação", "Blues", "mm", day_idx)
+        z_p   = grid_data["precip"][:, :, day_idx].flatten()
+        cmax_p = float(np.nanmax(grid_data["precip"])) or 1.0
+
+        fig_p = go.Figure(_base_traces())
+        fig_p.add_trace(go.Scattergeo(
+            lat=GRID_LAT_FLAT, lon=GRID_LON_FLAT,
+            mode="markers",
+            marker=dict(
+                color=z_p, colorscale="Blues", size=14, opacity=0.85,
+                cmin=0, cmax=cmax_p,
+                colorbar=dict(title="mm", thickness=14, len=0.7),
+                line=dict(color="white", width=0.4),
+            ),
+            text=[f"{v:.1f} mm" if not np.isnan(v) else "—" for v in z_p],
+            hovertemplate="%{text}<extra></extra>",
+            name="Precipitação",
+        ))
+        fig_p.update_layout(
+            geo=GEO_LAYOUT, height=500,
+            margin=dict(l=0, r=0, t=35, b=0),
+            title=dict(text=f"Precipitação diária — {day_labels[day_idx]}", font=dict(size=13)),
+        )
         st.plotly_chart(fig_p, use_container_width=True)
 
+    # ── Vento 10m com vetores ─────────────────────────────────────────────────
     with tab_wind:
-        fig_w = _make_contour(grid_data["wind"], "Vento 10m", "YlOrRd", "km/h", day_idx)
+        z_w    = grid_data["wind"][:, :, day_idx].flatten()
+        cmax_w = float(np.nanmax(grid_data["wind"])) or 1.0
+        u_2d   = grid_data["u_wind"][:, :, day_idx]
+        v_2d   = grid_data["v_wind"][:, :, day_idx]
+        arr_lats, arr_lons = build_wind_vectors(u_2d, v_2d)
+
+        fig_w = go.Figure(_base_traces())
+        fig_w.add_trace(go.Scattergeo(
+            lat=GRID_LAT_FLAT, lon=GRID_LON_FLAT,
+            mode="markers",
+            marker=dict(
+                color=z_w, colorscale="YlOrRd", size=13, opacity=0.7,
+                cmin=0, cmax=cmax_w,
+                colorbar=dict(title="km/h", thickness=14, len=0.7),
+                line=dict(color="white", width=0.3),
+            ),
+            text=[f"{v:.0f} km/h" if not np.isnan(v) else "—" for v in z_w],
+            hovertemplate="%{text}<extra></extra>",
+            name="Velocidade 10m",
+        ))
+        if arr_lats:
+            fig_w.add_trace(go.Scattergeo(
+                lat=arr_lats, lon=arr_lons, mode="lines",
+                line=dict(color="#1C2833", width=1.3),
+                name="Direção do vento", showlegend=True, hoverinfo="skip",
+            ))
+        fig_w.update_layout(
+            geo=GEO_LAYOUT, height=500,
+            margin=dict(l=0, r=0, t=35, b=0),
+            title=dict(text=f"Vento máximo 10m — {day_labels[day_idx]}", font=dict(size=13)),
+        )
         st.plotly_chart(fig_w, use_container_width=True)
 
+    # ── Rajada ────────────────────────────────────────────────────────────────
     with tab_gusts:
-        fig_g = _make_contour(grid_data["gusts"], "Rajada", "OrRd", "km/h", day_idx)
+        z_g    = grid_data["gusts"][:, :, day_idx].flatten()
+        cmax_g = float(np.nanmax(grid_data["gusts"])) or 1.0
+
+        fig_g = go.Figure(_base_traces())
+        fig_g.add_trace(go.Scattergeo(
+            lat=GRID_LAT_FLAT, lon=GRID_LON_FLAT,
+            mode="markers",
+            marker=dict(
+                color=z_g, colorscale="OrRd", size=14, opacity=0.85,
+                cmin=0, cmax=cmax_g,
+                colorbar=dict(title="km/h", thickness=14, len=0.7),
+                line=dict(color="white", width=0.4),
+            ),
+            text=[f"{v:.0f} km/h" if not np.isnan(v) else "—" for v in z_g],
+            hovertemplate="%{text}<extra></extra>",
+            name="Rajada",
+        ))
+        fig_g.update_layout(
+            geo=GEO_LAYOUT, height=500,
+            margin=dict(l=0, r=0, t=35, b=0),
+            title=dict(text=f"Rajada máxima — {day_labels[day_idx]}", font=dict(size=13)),
+        )
         st.plotly_chart(fig_g, use_container_width=True)
 
 # ── Rodapé ─────────────────────────────────────────────────────────────────────
