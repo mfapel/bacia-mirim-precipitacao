@@ -32,7 +32,15 @@ def get_stations() -> pd.DataFrame:
         resp = requests.get(url, timeout=30)
         resp.raise_for_status()
     except requests.RequestException as e:
-        st.error(f"Erro ao buscar estações: {e}")
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status in (502, 503, 504):
+            st.warning(
+                "API do INMET temporariamente indisponível (erro de servidor). "
+                "Os dados de estações serão exibidos assim que o serviço for restabelecido. "
+                "Tente recarregar a página em alguns minutos."
+            )
+        else:
+            st.error(f"Erro ao conectar com a API do INMET: {e}")
         return pd.DataFrame()
 
     df = pd.DataFrame(resp.json())

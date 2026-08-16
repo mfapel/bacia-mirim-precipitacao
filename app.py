@@ -110,10 +110,6 @@ with st.spinner("Buscando estações INMET na região..."):
     stations_df = get_stations()
 
 if stations_df.empty:
-    st.error(
-        "Não foi possível carregar as estações. "
-        "Verifique a conectividade com a API do INMET e tente novamente."
-    )
     st.stop()
 
 st.success(f"{len(stations_df)} estações encontradas na região da Bacia Mirim.")
